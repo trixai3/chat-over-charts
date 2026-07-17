@@ -13,6 +13,7 @@
     "@ai-sdk/anthropic": "^3.0.97",
     "@ai-sdk/react": "^3.0.231",
     "@clickhouse/client": "^1.23.1",
+    "@openrouter/ai-sdk-provider": "^2.10.0",
     "@trigger.dev/react-hooks": "^4.5.4",
     "@trigger.dev/sdk": "^4.5.4",
     "ai": "^6.0.229",
