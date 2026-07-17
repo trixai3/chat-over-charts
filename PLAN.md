@@ -656,8 +656,14 @@ it's the hackathon's headline ask, and Trigger.dev judges will reward depth on t
    is exactly right; `onAction` works for drill-down (though it's designed for state mutation, so
    we're borrowing it — see NOTES-day1 §4.1b).
 
-- *Mitigation:* `chat.local` and `@trigger.dev/sdk/ai/test` exist for local dev/testing. Day 2 is
-  the spike; if it collapses, the `/guides/ai-agents` plain-`task()` track is the fallback.
+- *Mitigation:* **`mockChatAgent`** from `@trigger.dev/sdk/ai/test` — an offline harness that runs
+  the real `run()` loop in an in-memory task runtime: *"no network, no task runtime, no mocking the
+  SDK."* Pair with `MockLanguageModelV3` from `ai/test` to script the model. **This means the entire
+  agent — tools, `toModelOutput`, the multi-turn loop, actions, stop signals — can be built and
+  tested with zero credentials.** Day 2 is the spike; if it collapses, the `/guides/ai-agents`
+  plain-`task()` track is the fallback.
+  *(Correction: an earlier draft claimed `chat.local` was for local dev. Wrong — `chat.local` is
+  run-scoped typed data, like AsyncLocalStorage. Read the docs, not the name.)*
 - *Hedge:* the Day 1 `/gallery` fixtures (§5.7) mean the visual layer is already built and verified
   **before** the spike. Worst case we have a working product with a weaker backend, not nothing.
 
