@@ -231,9 +231,7 @@ in, so one physical place wears several administrative names depending on when i
 
 ### 5.3 The agent contract
 
-Tools registered via `chat.toStreamTextOptions({ tools })`, each returning `{data, viewSpec, queryStats}`:
-
-| Tool | Returns |
+| Tool | Produces |
 |---|---|
 | `mapPrices` | choropleth |
 | `priceHistory` | timeseries |
@@ -241,6 +239,7 @@ Tools registered via `chat.toStreamTextOptions({ tools })`, each returning `{dat
 | `distribution` | histogram |
 | `affordability` | affordability view |
 | `disambiguatePlace` | **no `execute`** → HITL pause (see 5.4) |
+| **`emitVerdict`** | the one-line verdict — **see below, this is load-bearing** |
 
 The LLM chooses tools and parameters. **It does not write SQL.**
 
@@ -250,6 +249,82 @@ The LLM chooses tools and parameters. **It does not write SQL.**
 >
 > **Decision:** tools for the core. *If* ahead by Day 5, add one guarded free-form query tool
 > (read-only user, row limit, timeout) to buy the "ask anything" feel without betting the demo on it.
+
+#### The verdict is a tool, not free text — that's what makes "no prose" structural
+
+A system prompt saying *"never output prose"* is a **soft** constraint. The model will violate it;
+explaining is what it's built to do.
+
+Make the verdict a **tool** and the model has no channel for prose at all. It wants to conclude? It
+must call `emitVerdict({ headline, detail?, tone })`, and `headline` is one string field. The
+frontend renders tiles only.
+
+**This turns "text is the garnish" from a prompt we're begging the model to honour into something
+the architecture makes impossible to violate.** It's also why `verdict` is a ViewSpec kind
+(§5.7) rather than a text stream — that was instinct on Day 1; this is the reason.
+
+#### ⚠️ `toModelOutput` — tool results enter the prompt, and that's a trap
+
+**A tool's return value is appended to `messages` and the model reads it on the next step.** So a
+tool returning `{data, viewSpec, queryStats}` would push every drillTarget, every histogram bin and
+every stats field into the prompt. Pure waste — and it bloats the cacheable prefix.
+
+The AI SDK's answer is `toModelOutput`, which splits one result into two paths:
+
+```
+tool.execute() → full result
+       ├─→ toModelOutput() → one compressed line → the prompt (what the model sees)
+       └─→ unchanged        → stream            → the frontend (what renders)
+```
+
+```ts
+compareAreas: tool({
+  inputSchema: z.object({ county: z.string(), budget: z.number() }),
+  execute: async (p) => {
+    const { rows, stats } = await queryClickHouse(p);
+    return { viewSpec: {/* ... */}, rows, stats };   // full → frontend
+  },
+  toModelOutput: ({ output }) => ({
+    type: "text",
+    value: "8 districts. £410k–£630k. Cheapest: Havering £445.5k (+17.9%). Steepest fall: Lambeth −7.2%.",
+  }),                                                 // one line → model
+})
+```
+
+**The design judgement is what the model needs to see** — not "as little as possible", because
+over-compress and it can't write the verdict. The line is:
+
+- **Rendering needs it** → viewSpec → frontend. (drillTargets, bin counts, stats — the model never
+  needs these.)
+- **Deciding needs it** → `toModelOutput` → model. (It must know which districts are in budget to
+  write "9 of 33 work". It does not need to know how long to draw the bars.)
+
+**This strengthens the whole architecture: the LLM doesn't author ViewSpecs — and it never even
+sees one.**
+
+#### ⚠️ The bug that only appears on turn 2
+
+Docs, verbatim:
+
+> **If you only pass tools to `streamText` and not to the config, the transform runs on turn 1 but
+> is skipped on every later turn.** The raw output gets stringified back into the prompt instead.
+
+This is the worst kind of bug: ask one question while testing and it never appears. Ask three on
+camera and the token count explodes, caching dies, and the model gets confused.
+
+**Tools must be declared on `chat.agent({ tools })`, then read back from the `run()` payload:**
+
+```ts
+export const myChat = chat.agent({
+  id: "bwt-chat",
+  tools,                                        // ← declare HERE, not just on streamText
+  run: async ({ messages, tools, signal }) =>   // ← read back from the payload
+    streamText({ ...chat.toStreamTextOptions({ tools }), model, messages, abortSignal: signal }),
+});
+```
+
+**Day 2 test:** ask three questions in a row and assert no ViewSpec JSON appears in the turn-2 and
+turn-3 prompts.
 
 ### 5.4 Trigger.dev — the capability map
 
@@ -417,33 +492,55 @@ clickable. The renderer stays generic; housing knowledge stays in the tools.
 
 ---
 
-## 6. Core agent flow
+## 6. Core agent flow — a tool loop, **not** a prompt chain
+
+**This is not prompt chaining.** There is no "plan call" followed by an "execute call" followed by a
+"verdict call". It is **one `streamText`, looping internally over tool steps**, with the model
+deciding its own path:
 
 ```
 [chat.agent run — ONE durable run per conversation, no API routes]
 
-message
+ONE system prompt  (chat.prompt.set in onChatStart — cacheable, dashboard-overridable)
   ↓
-1. PLAN        model turn → picks tools + params
-2. RESOLVE     ClickHouse dictGet → place names → canonical entities
-                 ambiguous? → disambiguatePlace tool (NO execute)
-                              → RUN PAUSES (unbilled, no concurrency slot)
-                              → chip tile renders → user clicks
-                              → RUN RESUMES
-3. TOOLS       params → SQL → ClickHouse → {data, viewSpec, queryStats}
-                 → streams.define().pipe() → TILE APPEARS
-4. VERDICT     one headline sentence, streamed as text
+message → run() → streamText({ tools, stopWhen: stepCountIs(15) })
+  ↓
+  ┌─ TOOL LOOP — the AI SDK drives this; the model picks the steps ──────────┐
+  │  step 1  resolvePlace("London")   → dictGet → result → back to model     │
+  │            ambiguous? → disambiguatePlace (NO execute)                   │
+  │                       → RUN SUSPENDS (unbilled, maxDuration stops)       │
+  │                       → chip tile → user clicks → addToolOutput → RESUMES│
+  │  step 2  compareAreas({...})      → ClickHouse → tile streams to UI      │
+  │  step 3  emitVerdict({headline})  → verdict tile                         │
+  │  → stopWhen                                                              │
+  └──────────────────────────────────────────────────────────────────────────┘
   ↓
 tile board renders; each tile carries its own drillTargets
 
-action (drill click) → onAction → ClickHouse → tile part → NO MODEL TURN
+action (drill click) → onAction → ClickHouse → tile → returns void → NO MODEL CALL
 stop                 → stopSignal → onCancel persists partial tiles
 refresh              → same run, conversation intact
 ```
 
+Each step's tool result re-enters the prompt — compressed by `toModelOutput`, never the raw
+ViewSpec (§5.3).
+
+**Why a loop beats a chain here, and what we give up:**
+
+- ✅ One fewer round trip — a chain would plan first, then execute.
+- ✅ **The model adapts to what it finds.** It sees Lambeth is down 7% and can go ask why, unprompted.
+  This is "progressive deepening" (Risk 4) for free — no extra machinery.
+- ✅ It's what `chat.agent` is designed for.
+- ❌ **We don't control how many tools it calls.** Could be one, could be eight. A chain is more
+  controllable but more rigid.
+
 **The verdict is the only text in the product**, and it's a headline — *"On £600k you're priced out
 of 24 of 33 boroughs; here are the 9 that work"* — not prose. The brief's own example asks for "a
-single verdict, not a forecast dump."
+single verdict, not a forecast dump." Making it a tool (§5.3) is what enforces that.
+
+> **Note:** the hackathon resources PDF links Trigger.dev's *"prompt chaining / routing /
+> parallelization / orchestrator"* guides. Those are the **older `/guides/ai-agents` track** (plain
+> `task()` + `generateText`). `chat.agent` does not use them. See §4.
 
 ---
 
@@ -470,7 +567,7 @@ Each day ends with something that runs **end-to-end** (small vertical slices, pe
 | Day | Work | Ends with |
 |---|---|---|
 | **1** (17 Jul) | Repo, MIT, skills installed, Next.js skeleton, **`ViewSpec` Zod schema + renderer registry + `/gallery` fixtures**, data loaded into ClickHouse Cloud with our own schema | **`/gallery` renders every tile kind from fixtures** — the whole visual layer, verified, with no LLM and no ClickHouse. Plus one hardcoded live query rendering one real chart. |
-| **2** (18 Jul) | **`chat.agent()` spike** + `useTriggerChatTransport` + one ClickHouse tool + Streams v2 | Type a question → agent picks a tool → a real view streams in. **The whole product, thin.** |
+| **2** (18 Jul) | **`chat.agent()` spike** + `useTriggerChatTransport` + one ClickHouse tool + `emitVerdict` + `toModelOutput` + Streams v2 | Type a question → agent picks a tool → a real view streams in. **The whole product, thin.** <br>**Must-pass test:** ask 3 questions in a row; assert no ViewSpec JSON leaks into the turn-2/3 prompts (§5.3). |
 | **3** (19 Jul) | Place-dictionary pipeline (`batch.triggerByTask` + idempotency) + resolver + **disambiguation as a no-`execute` HITL tool** | "Clapham" pauses the run, chips render, a click resumes it — resolving to Lambeth, not Bedford |
 | **4** (20 Jul) | **The drill-down via `onAction`** — the differentiator, protected day | Click a tile → new tile, no model turn, sub-second |
 | **5** (21 Jul) | Stop button (`stopSignal`), monthly `schedules.task()`, query-cost display, error/empty states, deploy | Live on Vercel |
@@ -578,6 +675,10 @@ For the app itself — separate from the Claude Code subscription.
 | Install by dist-tag | `ai@ai-v6`, `@ai-sdk/react@ai-v6`, … | Majors don't line up: ai@6 ↔ react@3 ↔ anthropic@3. `@latest` silently pairs with ai@7 |
 | OLTP+OLAP bonus | **Skip** | Stay focused on the main rubric |
 | Agent → SQL | Constrained tools | Demo reliability over flexibility |
+| **Agent control flow** | **Tool loop, not prompt chain** (17 Jul) | One `streamText` + `stopWhen`; the model picks its own steps. Fewer round trips, and it adapts to what it finds — progressive deepening for free. Cost: we don't control how many tools it calls. |
+| **The verdict** | **A tool (`emitVerdict`), not free text** | A system prompt saying "no prose" is a soft constraint the model *will* break. A tool leaves it no channel for prose. Makes the brief structurally enforced. |
+| **Tool → model payload** | **`toModelOutput` compresses to one line** | Tool results enter the prompt. Raw ViewSpecs would bloat it and the cache prefix. Split: rendering data → frontend, decision data → model. The LLM never sees a ViewSpec. |
+| Tool declaration site | On `chat.agent({ tools })`, read back from `run()` payload | Docs: config-less tools skip `toModelOutput` **from turn 2 onward** and stringify raw output into the prompt. A bug invisible in one-question testing. |
 | ClickHouse instance | Our own Cloud, not playground | Owning the schema is what 25% rewards |
 | Semantic layer | **Thin** — resolver + metrics + hierarchy | Full semantic model is a week; resolver is demo-critical |
 | Place resolution | ClickHouse dictionary, LLM-built offline | 62% of localities ambiguous; naive match returns Bedford |

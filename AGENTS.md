@@ -62,19 +62,30 @@ mention `chat.agent`), not as skills. Use the docs; don't trust the skills on th
 
 ## Architecture invariants — don't break these
 
-1. **The agent never returns prose.** Tools return a typed `ViewSpec`. The only text in the product
-   is a one-line verdict headline. If an answer becomes a paragraph, the brief is missed.
-2. **The LLM does not author ViewSpecs.** It picks a tool and fills params (Zod-validated by the AI
-   SDK). Our own tool code constructs the spec after the query returns. This is why specs can't be
-   hallucinated.
-3. **The LLM does not write SQL.** Constrained tools only. A demo that hallucinates a column name is
+1. **The agent never returns prose.** The verdict is a **tool** (`emitVerdict`), not free text — a
+   system prompt saying "no prose" is a soft constraint the model will break; a tool leaves it no
+   channel. If an answer becomes a paragraph, the brief is missed.
+2. **The LLM does not author ViewSpecs — and never sees one.** It picks a tool and fills params
+   (Zod-validated by the AI SDK). Our tool code builds the spec after the query returns, and
+   `toModelOutput` compresses what reaches the model to one line. Tool results *do* enter the
+   prompt, so a raw ViewSpec would bloat both the context and the cache prefix. Split it:
+   **rendering data → frontend, decision data → model.**
+3. **Declare tools on `chat.agent({ tools })`, then read them back from the `run()` payload** — not
+   just on `streamText`. Otherwise `toModelOutput` is skipped **from turn 2 onward** and raw output
+   is stringified into the prompt. Invisible when you test with one question; fatal on camera.
+4. **Control flow is a tool loop, not a prompt chain.** One `streamText` + `stopWhen: stepCountIs(n)`;
+   the model picks its own steps. The `/guides/ai-agents` prompt-chaining patterns are the *older*
+   track — don't import them here.
+5. **The LLM does not write SQL.** Constrained tools only. A demo that hallucinates a column name is
    a dead demo.
-4. **Exactly one runtime validation boundary**: `ViewSpec.safeParse` on the client, in
+6. **Exactly one runtime validation boundary**: `ViewSpec.safeParse` on the client, in
    `tile-renderer.tsx`. It guards version skew, not hallucination. Don't add validation elsewhere.
-5. **No Next.js API routes.** `chat.agent()` + `useTriggerChatTransport` replace them. Adding a
+7. **No Next.js API routes.** `chat.agent()` + `useTriggerChatTransport` replace them. Adding a
    route means the architecture was misunderstood.
-6. **Drill-down never calls the LLM.** It goes through `onAction` on the same durable run.
-7. **Aggregate in ClickHouse; stream small results.** Specs carry data, not query references. Never
+8. **Drill-down never calls the LLM.** It goes through `onAction`, returning void, on the same
+   durable run. (Note: `onAction` is *designed* for state mutation — undo/rollback/edit. We're
+   borrowing it. Test the edges.)
+9. **Aggregate in ClickHouse; stream small results.** Specs carry data, not query references. Never
    stream raw rows.
 
 ## Version pinning
