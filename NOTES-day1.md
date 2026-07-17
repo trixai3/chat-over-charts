@@ -110,25 +110,79 @@ error TS1360: Property 'choropleth' is missing in type '{ verdict: ...; timeseri
 
 ## 4. 偏差记录(实现过程中与计划不符的地方)
 
-### ⚠️ 4.1 官方 skills **完全没覆盖 `chat.agent()`** —— Risk 1 上升
+### ✅ 4.1 官方 skills 没覆盖 `chat.agent()` —— 但我当时的结论是**错的**,Risk 1 其实**下降**
 
-计划里写"装 skills 能弥补我对 15 天新 API 的知识空白"。**这条不成立。**实测:
+> **本节已于 7/17 晚修正。**留着原始判断和修正过程,因为犯错的过程本身有价值。
 
-| 搜索词 | 命中文件数 |
-|---|---|
-| `chat.agent` | **0** |
-| `sdk/ai` | **0** |
-| `toStreamTextOptions` | **0** |
-| `useTriggerChatTransport` | **0** |
-| `streams.define` | 3 ✅ |
-| `metadata.stream`(已废弃) | 0 ✅ |
+**我当时观测到的(仍然成立):**skills 里搜 `chat.agent` / `sdk/ai` / `toStreamTextOptions` /
+`useTriggerChatTransport` —— **全部 0 命中**。`trigger-agents` 讲的是老的 `/guides/ai-agents`
+track(plain `task()` + `generateText`)。
 
-`trigger-agents` 这个 skill 的描述是 "orchestration, parallelization, routing,
-evaluator-optimizer" —— 正是我研究里说的**老的 `/guides/ai-agents` track**,不是 `chat.agent()`。
-官方 skills 还没跟上 15 天前 GA 的新平台。
+**我当时下的结论(错了):**"Day 2 没有兜底,只能靠官方文档,Risk 1 上升。"
 
-**影响:**Day 2 的 chat.agent 攻坚**没有 skill 兜底**,只能靠官方文档。
-**好消息:**Streams v2(`streams.define` + `useRealtimeStream`)是覆盖的,那是 Day 2 的另一半。
+**实际情况:**官方文档**就在本地** —— Trigger.dev 把 **159 个 `.mdx` 打包进了 npm 包**:
+
+```
+node_modules/@trigger.dev/sdk/docs/          ← 159 篇
+node_modules/@trigger.dev/sdk/docs/ai-chat/  ← 39 篇,专讲 chat.agent,含 13 个 patterns
+```
+
+覆盖度实测:
+
+| 搜索词 | skills | **打包文档** |
+|---|---|---|
+| `chat.agent` | 0 | **47 个文件** |
+| `useTriggerChatTransport` | 0 | **18** |
+| `onAction` | 0 | **17** |
+| `toStreamTextOptions` | 0 | **15** |
+| `actionSchema` | 0 | **11** |
+
+**所以真相是:Trigger.dev 把 chat.agent 的知识放在打包文档里,不是 skills 里。我查错了地方。**
+这不是缺口 —— 反而是**比 skills 更好的来源**,因为它跟着你装的版本走,不会像网站或我的记忆那样过时。
+
+**Risk 1 ⬇️ 下降。**Day 2 有版本精确的一手文档。
+
+**这个模式值得记住 —— 三家都这么做:**
+
+| 来源 | 位置 | 数量 |
+|---|---|---|
+| Trigger.dev | `node_modules/@trigger.dev/sdk/docs/` | 159 篇 |
+| Next.js 16 | `node_modules/next/dist/docs/` | 423 个文件 |
+| ClickHouse | `.agents/skills/` + `@clickhouse/client/skills/` | 17 skills |
+
+**为什么会这样:**因为 LLM 的训练数据必然过时,这些公司开始把**版本精确的文档随包分发**。
+Next.js 那句 "Read the relevant guide in `node_modules/next/dist/docs/`" 就是同一件事。
+**以后先查 `node_modules`,再查网络,最后才轮到我的记忆。**已写进 `AGENTS.md`。
+
+### 4.1b 拿打包文档验证了两个架构假设 —— 一对一错
+
+既然文档在本地,我立刻验证了 Day 3/Day 4 依赖的两块基石。
+
+**✅ HITL(消歧 tile)—— 假设完全正确,细节比我说的还好**
+
+`ai-chat/patterns/human-in-the-loop.mdx` 原话:*"the building block is a tool with no `execute`
+function"*。完全对。而且:
+
+- 模型调用无 `execute` 的 tool → `streamText` 结束,tool call 停在 `input-available` 状态
+- run 先热等 `idleTimeoutInSeconds`(默认 30s),然后**挂起并释放算力**
+- **用户思考时间不计费,且不消耗 `maxDuration`** —— 文档说用户可以花几分钟、几小时甚至几天
+- 前端用 `addToolOutput({ tool, toolCallId, output })` 唤醒
+- AI SDK 会自动复用同一条 assistant message ID,所以恢复后是**合并好的完整消息**
+
+**⚠️ Actions(下钻)—— 我理解偏了,但结论仍然成立**
+
+我在计划里说"下钻就是 action,`onAction` 是为这个而生的"。**不准确。**文档说 actions 的设计目的是
+*"mutate chat state — undo, rollback, edit, regenerate"*,是**改对话状态**,不是"跑一个查询"。
+
+但关键的一句救了这个设计:**"returning void → side-effect-only, no model call"**。
+所以下钻可以这样做:前端 `transport.sendAction(chatId, {...})` → `actionSchema` 用 Zod 校验 →
+`onAction` 里跑 ClickHouse 查询 → 推 tile → **返回 void,不调模型**。
+
+**结论不变(下钻不走 LLM、亚秒、同一个 run),但我描述的理由是错的。**这个区别在 Day 4 会变得重要 ——
+我们是在借用 action 机制,不是在用它的设计初衷,所以边界情况要自己测。
+
+**意外收获:**`chat.history.getPendingToolCalls()` 可以在**消歧未决时挡住竞争性 action** ——
+正好防止用户在 Clapham 还没选完时乱点下钻。这个我没想到,文档送的。
 
 ### ⚠️ 4.2 Next.js 16 自己警告"你认识的 Next.js 已经变了"
 
@@ -242,6 +296,9 @@ create-next-app 默认的 `.gitignore` 里是 `.env*`,这会导致**该提交的
 
 **风险变化:**
 
-- Risk 1(chat.agent 太新)⬆️ **上升** —— 官方 skills 零覆盖(§4.1),但核心 API 已验证存在,
-  且 gallery 已经把最坏情况兜住了。
+- Risk 1(chat.agent 太新)⬇️ **下降**(7/17 晚修正,原判断是上升)。三个理由:
+  1. 核心 API 已实测存在(§5.1 测试 5)
+  2. **159 篇版本精确的官方文档就在 `node_modules`**,39 篇专讲 ai-chat(§4.1)
+  3. gallery 已经把最坏情况兜住了(§3.3)
+  另外 HITL 假设已用文档验证为正确,actions 虽然理解有偏差但方案成立(§4.1b)。
 - Risk 2/3/4/5 无变化。

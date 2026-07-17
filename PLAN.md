@@ -483,16 +483,32 @@ Day 2 deliberately front-loads the riskiest new API so there's buffer if it bite
 
 ## 9. Risks
 
-### Risk 1 — `chat.agent()` is fifteen days old
+### Risk 1 — `chat.agent()` is fifteen days old — **downgraded 17 Jul**
 
-GA'd 2026-07-02; latest patch three days ago. Docs may be thin, rough edges likely, and there is no
-folk knowledge to fall back on. **This is a real risk and we're taking it deliberately** — it's the
-hackathon's headline ask, and judges from Trigger.dev will reward depth on their newest platform.
+GA'd 2026-07-02; latest patch three days ago. No folk knowledge to fall back on. Taken deliberately:
+it's the hackathon's headline ask, and Trigger.dev judges will reward depth on their newest platform.
+
+**Downgraded on Day 1 for three reasons:**
+
+1. **The API is verified real.** `chat.agent`, `toStreamTextOptions`, `createStopSignal`,
+   `isStopped`, `useTriggerChatTransport` all import successfully.
+2. **The docs are not thin — they ship in the package.** `node_modules/@trigger.dev/sdk/docs/` has
+   **159 `.mdx` files**, of which **39 are `ai-chat/`** including 13 `patterns/`. 47 files mention
+   `chat.agent`. These are *version-exact* — better than the website, which may drift from 4.5.4.
+   (The installed *skills* don't cover the chat surface — that's not a gap, it's just not where
+   Trigger.dev put this knowledge.)
+3. **Two architecture assumptions are now verified against those docs:** HITL-via-no-`execute`-tool
+   is exactly right; `onAction` works for drill-down (though it's designed for state mutation, so
+   we're borrowing it — see NOTES-day1 §4.1b).
 
 - *Mitigation:* `chat.local` and `@trigger.dev/sdk/ai/test` exist for local dev/testing. Day 2 is
   the spike; if it collapses, the `/guides/ai-agents` plain-`task()` track is the fallback.
 - *Hedge:* the Day 1 `/gallery` fixtures (§5.7) mean the visual layer is already built and verified
   **before** the spike. Worst case we have a working product with a weaker backend, not nothing.
+
+**Standing rule this produced:** read `node_modules` docs first, web second, memory last. Every
+vendor here ships version-exact docs in-package (Trigger.dev 159, Next.js 423) precisely because
+model training data goes stale. See `AGENTS.md`.
 
 ### Risk 2 — the deadline is ambiguous
 

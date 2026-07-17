@@ -31,14 +31,34 @@ This bit us three times in one day. Assume your memory is wrong and check:
 | AI SDK majors | `ai@6` pairs with `@ai-sdk/react@3`, **not** `@ai-sdk/react@6` |
 | Next.js 16 | See the block at the top of this file |
 
-**Verify against live docs and npm, not memory.** `npm view <pkg> version`; fetch
-`https://trigger.dev/docs/<path>.md` for raw markdown. When research contradicts what you "know",
-research wins.
+**Verify against docs, not memory.** When research contradicts what you "know", research wins.
 
-⚠️ **The installed Trigger.dev skills do NOT cover `chat.agent()`.** They document the older
-`/guides/ai-agents` track (plain `task()` + `generateText`). Verified: zero hits for `chat.agent`,
-`sdk/ai`, `toStreamTextOptions`, `useTriggerChatTransport`. They *are* current for Streams v2
-(`streams.define`, `useRealtimeStream`). Don't trust them on the chat agent surface.
+## 📚 Read the docs shipped in node_modules — they are the authority
+
+Every vendor here ships **version-exact docs inside the npm package**. This is the whole point:
+their docs travel with the version you installed, so they can't be stale the way your training data
+and the public website both can be. **Check here first, before the web, before your memory.**
+
+| Source | Location | Size |
+|---|---|---|
+| **Trigger.dev** | `node_modules/@trigger.dev/sdk/docs/` | **159 `.mdx`** |
+| ↳ the chat agent surface | `node_modules/@trigger.dev/sdk/docs/ai-chat/` | **39 files**, incl. 13 `patterns/` |
+| **Next.js 16** | `node_modules/next/dist/docs/` | 423 files |
+| **ClickHouse** | `.agents/skills/` and `node_modules/@clickhouse/client/skills/` | 17 skills |
+
+Most relevant to this build:
+
+- `ai-chat/quick-start.mdx`, `anatomy.mdx`, `backend.mdx`, `frontend.mdx`, `tools.mdx`, `types.mdx`
+- `ai-chat/actions.mdx` — the drill-down mechanism
+- `ai-chat/patterns/human-in-the-loop.mdx` — the disambiguation tile
+- `ai-chat/reference.mdx` — the AI SDK compatibility matrix
+- `ai-chat/testing.mdx`, `chat-local.mdx` — local dev without deploying
+
+⚠️ **The installed Trigger.dev *skills* do NOT cover `chat.agent()`** — verified, zero hits for
+`chat.agent` / `sdk/ai` / `toStreamTextOptions` / `useTriggerChatTransport`. They document the older
+`/guides/ai-agents` track (plain `task()` + `generateText`), and are current only for Streams v2.
+**This is not a gap** — Trigger.dev ships that knowledge as the packaged docs above (47 files
+mention `chat.agent`), not as skills. Use the docs; don't trust the skills on the chat surface.
 
 ## Architecture invariants — don't break these
 
