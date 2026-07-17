@@ -223,6 +223,16 @@ in, so one physical place wears several administrative names depending on when i
 
 **A naive resolver sends someone asking about Clapham to Bedford. That is demo death.**
 
+> **The resolver splits in two — and this de-risks the plan (decided 18 Jul).** The demo-critical
+> behaviour ("Clapham" → disambiguation, not Bedford) needs **only a live SQL query**, verified:
+> `WHERE locality='CLAPHAM' GROUP BY county, district` returns 5 places in 836ms, biggest in
+> Bedfordshire. **No offline pipeline, no LLM, no dictionary.** That's the Day 3 core.
+>
+> The **offline LLM dictionary** (7,726 localities → `dictGet`) handles what SQL can't — aliases
+> ("north London"), postcodes ("SW4"), misspellings, defunct-district collapse. It was sold as the
+> *"why Trigger.dev matters"* story, but `chat.agent()` is now the whole backend, so Trigger.dev no
+> longer depends on it. **Demoted from Day-3 foundation to Day-5 enhancement.** See IMPLEMENTATION §4a.
+
 **b) A metrics registry.** One module defining "median price", "5-year growth", etc.
 `avg(price)` is a *lie* on house prices — the distribution is heavily skewed (`other` averages
 £1.18M). Median via `quantileTDigest` is honest. Define it once, defend it once.
@@ -755,7 +765,8 @@ For the app itself — separate from the Claude Code subscription.
 | Tool declaration site | On `chat.agent({ tools })`, read back from `run()` payload | Docs: config-less tools skip `toModelOutput` **from turn 2 onward** and stringify raw output into the prompt. A bug invisible in one-question testing. |
 | ClickHouse instance | Our own Cloud, not playground | Owning the schema is what 25% rewards |
 | Semantic layer | **Thin** — resolver + metrics + hierarchy | Full semantic model is a week; resolver is demo-critical |
-| Place resolution | ClickHouse dictionary, LLM-built offline | 62% of localities ambiguous; naive match returns Bedford |
+| Place resolution — core | **Live SQL ambiguity check** (18 Jul) | Verified 836ms; no offline pipeline needed for the demo-critical path |
+| Place resolution — enhancement | ClickHouse dictionary, LLM-built offline | Handles aliases/postcodes/misspellings. **Demoted to optional** — chat.agent carries the Trigger.dev story now |
 | **Agent runtime** | **`chat.agent()`** (17 Jul) | GA 15 days before the hackathon — this event is its showcase. Trigger.dev *is* the backend; no API routes. |
 | Pattern track | `/docs/ai-chat/*`, **not** `/guides/ai-agents` | Handbook names `chat.agent()`; the guides track is older |
 | Disambiguation | No-`execute` tool (HITL pause) | The chip tile *is* Trigger.dev's HITL primitive |
