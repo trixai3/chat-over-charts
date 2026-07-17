@@ -361,12 +361,70 @@ saves nothing and weakens the pitch. **Do not put this in the pitch.** *(Note th
 **offline** batch fan-out over 7,726 localities is kept and is genuinely justified — those are slow
 LLM calls, not fast queries.)*
 
-### 5.5 Surface — Next.js on Vercel
+### 5.5 The user experience — Next.js on Vercel
 
-- Chat input, but the transcript is a **board of live tiles**, not messages
-- Breadcrumbs show the drill path
-- Each tile shows **rows scanned + query time** — the most direct way to show a judge what
-  ClickHouse is doing
+**This doubles as the demo script.** If a beat here doesn't survive contact with a judge in five
+minutes, it's the wrong beat.
+
+#### The journey
+
+| t | What the user sees | What's happening |
+|---|---|---|
+| **0s** | Input box + 3 example questions. No welcome copy, no intro. | Empty state — users don't know what they can ask. |
+| | *types "Where can I afford in London on £600k?"* | |
+| **0.2s** | A **grey skeleton verdict card** appears at the top. | `useTriggerChatTransport` starts a chat.agent run, subscribes to the handle. |
+| **0.2–3s** | `Locating "London"… ` → `Querying 33 boroughs…` → `Writing the verdict…` | **The tool loop, made visible.** Each step surfaces as it fires. |
+| **3s** | **First tile lands.** 33 boroughs; Havering +17.9% green next to Lambeth −7.2% red. Footer: `31.2M rows · 47ms`. | `compareAreas` → ClickHouse → streamed via Streams v2. |
+| **4s** | The skeleton **fills in**: *"On £600k you're priced out of 24 of 33 London boroughs — 9 work"* | `emitVerdict` tool call. |
+
+**The user has their answer. Not one word of prose.**
+
+Then the part that actually differentiates us:
+
+| Action | What happens | Why it matters |
+|---|---|---|
+| **Click Havering** | Breadcrumb `London › Havering`; a new tile appends below. **Sub-second — no wait at all.** | `onAction` → ClickHouse → returns void. **Never touches the model.** The contrast with the 3s first answer is stark on camera. |
+| **Type "What about Clapham?"** | Amber card: *"Which Clapham do you mean?"* — 5 chips. **Run suspends.** | The single most valuable 20 seconds of the demo — see below. |
+| **Click Lambeth** | Run resumes, Lambeth tiles render. | `addToolOutput` wakes the suspended run. |
+| **Refresh the page** | Conversation is still there. | The run is durable. |
+
+#### Why the Clapham beat is the demo's centrepiece
+
+It proves three things at once, in one interaction:
+
+1. **The data really is this messy** — the biggest Clapham is in *Bedfordshire*, not London.
+2. **We don't guess.** A naive agent silently returns Bedford and nobody notices it's wrong.
+3. **The pause is Trigger.dev's HITL primitive doing its job** — unbilled, no concurrency slot, and
+   `maxDuration` stops ticking. The user can take days.
+
+#### Three UX decisions (made 17 Jul)
+
+**1. Verdict: skeleton at the top, filled last.**
+There's a real conflict — the model must *see* the data before it can conclude, so the verdict is
+generated **last**; but a reader wants the conclusion **first**. A skeleton placeholder resolves it:
+reading order stays correct, and the wait gains structure ("the answer is coming"), rather than the
+user staring at charts wondering which one is the point. Cost: one more loading state to build.
+*Rejected:* animating the verdict into the top afterwards (page jump, and the first 3s are
+directionless); putting the verdict at the bottom (simplest, but it just doesn't answer the question).
+
+**2. During the wait: show the tool calls, not a spinner.**
+The model is the only slow part (~2–3s; ClickHouse is 50ms). Surfacing `Locating "London"… Querying
+33 boroughs…` turns dead time into information — **and lets a judge watch the agent work**, which is
+free credit on the 25% criterion. A spinner wastes that. Cost: the loop's steps must stream to the
+frontend.
+
+**3. Multi-turn: stack downward, one card group per turn.**
+Like chat, but each "message" is a group of charts. Preserves exploration history, matches the
+mental model of a chat agent, and matches `useChat`'s default.
+*Rejected:* a replacing dashboard — loses history, and stops feeling like a chat agent, which risks
+missing the brief.
+
+#### Always on screen
+
+- **Breadcrumbs** for the drill path
+- **`rows scanned · query time` on every tile** — the most direct way to show a judge ClickHouse
+  working
+- **A stop button** while a turn is in flight (`stopSignal`; partial tiles are kept)
 
 ### 5.6 Dependencies — pinned, with a trap
 
@@ -655,8 +713,18 @@ For the app itself — separate from the Claude Code subscription.
 
 - [ ] Public GitHub repo, MIT or Apache-2.0, public through judging
 - [ ] Demo video ≤5 min, opens directly on the working product
-- [ ] **Video spends ~20s on the Trigger.dev dashboard** — run tree, ingest runs, LLM batch, retries.
-      "Meaningful use" is judged in five minutes; showing the machinery beats asserting it.
+
+#### Demo video shot list (derived from §5.5 — no intro, straight in)
+
+| Time | Shot | The point it proves |
+|---|---|---|
+| 0:00 | Type the question, hit enter. Tool steps stream, tile lands, verdict fills in. | The answer is a chart, not a paragraph. |
+| 0:45 | **Click a borough. Sub-second.** Then click again, and again. | Explorable, not decorative. The speed contrast vs the 3s first answer *is* the argument. |
+| 1:20 | Type "Clapham" → suspend → 5 chips → **say out loud that the biggest one is in Bedfordshire** → click Lambeth → resumes. | The data is messy, we don't guess, and Trigger.dev's HITL is doing real work. |
+| 2:00 | Point at `31.2M rows · 47ms` on a tile. | ClickHouse, visibly. |
+| 2:20 | **Trigger.dev dashboard**: the run tree, the suspended HITL waitpoint, the monthly ingest, the 7,726-locality LLM batch with retries. | "Meaningful use" is judged in five minutes. Showing the machinery beats asserting it in a README. |
+| 3:30 | Architecture in 60s: no API routes, the LLM never writes SQL and never sees a ViewSpec. | Technical implementation (20%). |
+| 4:30 | Land the one-liner. | — |
 - [ ] Project title (≤100 chars), tagline (≤160 chars), solution summary (≤500 words)
 - [ ] Description of how ClickHouse and Trigger.dev are each used
 - [ ] Name + email
