@@ -15,7 +15,7 @@
 | 数据层(ClickHouse) | ✅ 基础完成,🔨 物化视图待建 | 31.35M 行已入我们自己的 schema |
 | 视觉层(tiles + gallery) | ✅ 完成 | 5 种 tile 全部渲染,fixture 用真数据 |
 | 模型层(getModel) | ✅ 完成,🔨 注入口待改 | OpenRouter/Anthropic env 切换 |
-| Agent(chat.agent) | ⬜ 未开始 | Day 2 主线 |
+| Agent(chat.agent) | 🔨 骨架跑通 | 切片 1 ✅(emitVerdict+注入缝+离线测试);切片 2 接 CH ⬜ |
 | 语义层 | ⬜ 未开始 | 三块,时机不同 —— 见 §4 |
 | 前端接线(transport) | ⬜ 未开始 | Day 2 后半 |
 | 下钻(onAction) | ⬜ 未开始 | Day 4 |
@@ -90,17 +90,19 @@
 
 按顺序:
 
-1. ⬜ **改 model 注入口** — `clientData?.model ?? getModel()`(§3 的 🔨)
-2. ⬜ **`trigger.config.ts` + `trigger/` 目录** — `npx trigger init`
-3. ⬜ **`compareAreas` tool** — 第一个真 tool,接 31M 行
+**切片 1(✅ 完成,无需 key):骨架跑通**
+1. ✅ **model 注入口** — `clientData?.model ?? getModel()`,写在 `trigger/house-agent.ts`
+2. ✅ **`trigger.config.ts` + `trigger/` 目录** — 手写 config(`maxDuration` 这版必填)
+4. ✅ **`emitVerdict` tool** — `src/agent/tools.ts`,带 `toModelOutput`;output 即 VerdictSpec
+5. ✅ **`chat.agent({ tools, run })`** — tools 声明在 config 上,注入缝就位
+   - ✅ 离线冒烟测试:假模型调 emitVerdict,断言零散文 + 裁决 tile 到前端(`npm test` 绿)
+
+**切片 2(⬜ 下一步):接 31M 行 + 必过回归测试**
+3. ⬜ **`compareAreas` tool** — 第一个真 tool,ClickHouse 走 `locals` 注入(可离线塞假客户端)
    - 带上指标注册表(§4b)+ 薄版地理层级(§4c)
-   - `execute` 返回完整 `{viewSpec, rows, stats}`
-   - **`toModelOutput` 压成一行** — 不让 viewSpec 进 prompt
-4. ⬜ **`emitVerdict` tool** — 让"零散文"成为架构保证,不是 prompt 祈求
-5. ⬜ **`chat.agent({ tools, run })`** — tools 声明在 config 上(不只 streamText)
+   - `execute` 返回 ComparisonSpec;**`toModelOutput` 压成一行** — 不让 viewSpec 进 prompt
 6. ⬜ **turn-2 回归测试** — 连问三轮,断言 turn 2/3 的 prompt 无 viewSpec JSON
-   - **这是必过测试**(那个只在多轮才炸的坑)
-   - 用 `mockChatAgent`,离线
+   - **这是必过测试**(那个只在多轮才炸的坑)—— 用 `mockChatAgent` + `setupLocals` 假 CH,离线
 
 **Day 2 收尾于:** 打字提问 → agent 选 tool → 真图流进来。整个产品的瘦版本。
 

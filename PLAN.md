@@ -371,6 +371,27 @@ saves nothing and weakens the pitch. **Do not put this in the pitch.** *(Note th
 **offline** batch fan-out over 7,726 localities is kept and is genuinely justified — those are slow
 LLM calls, not fast queries.)*
 
+#### Which of Trigger.dev's canonical purposes do we actually lean on?
+
+The table above lists the *features* we touch. This one answers a sharper question: Trigger.dev is
+sold as a **background-job runtime** — long windows, retries, realtime logging, webhook/event
+triggers. Of those four, how many are load-bearing *for us*? Honest answer: **two, hard; two,
+incidental.** That's a deliberate bet on Trigger.dev's *new* face (`chat.agent()` as a durable
+conversation runtime) over its *old* face (cron + webhooks + retries).
+
+| Canonical purpose | Do we lean on it? | Weight |
+|---|---|---|
+| **Long execution window** | Yes — but inverted. Not long *compute*; a run that **suspends to wait on a human at zero cost**. The no-`execute` disambiguation tool parks the run — unbilled, no concurrency slot, `maxDuration` stops ticking — plus the session survives refresh/deploy. | ★★★ load-bearing |
+| **Realtime progress** | Yes, strongly. Streams v2 pushes tiles into the UI as they land; the wait shows *tool-loop steps*, not a spinner; `useTriggerChatTransport` runs `useChat` over Realtime with no API routes. | ★★★ load-bearing |
+| **Retry logic** | Barely. A ~50ms ClickHouse query needs none; the only real retry story is the *optional* monthly-ingest batch. If a judge expects "watch it retry," we don't have that beat. | ★ incidental |
+| **Webhook / event trigger** | Barely. Our trigger is a user typing (frontend → `session.in`). The only genuine scheduled trigger is `schedules.task()` monthly ingest — 🟡 optional/demoted. | ★ incidental |
+
+**The one hard rebuttal to "why not just a plain Next.js app?"** Hand-rolling *suspend-a-run-to-wait-
+on-a-human-for-free* + *multi-turn session that survives refresh/deploy* + *reconnecting stream
+replay* is a whole state-store-plus-resumption-plus-replay stack. `chat.agent()` gives it for free.
+The Clapham beat (§5.5, and the dashboard waitpoint at §11) is where that becomes visible in 20
+seconds — which is the point, since "meaningful use" is judged on camera, not asserted in a README.
+
 ### 5.5 The user experience — Next.js on Vercel
 
 **This doubles as the demo script.** If a beat here doesn't survive contact with a judge in five

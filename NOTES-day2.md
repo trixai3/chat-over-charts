@@ -93,3 +93,44 @@ Land Registry 存的是单字母(`T`/`S`/`D`/`F`/`O`、`F`/`L`)。我在 `02-loa
 
 用 `mockChatAgent` 离线写 `chat.agent` + 第一个真 ClickHouse tool + `emitVerdict` + `toModelOutput`,
 必过测试:连问三轮,断言 turn 2/3 的 prompt 里没有 ViewSpec JSON。
+
+---
+
+## 5. 切片 1 —— agent 骨架跑通(无需任何 key)
+
+**做了什么:** 把 §5 那六步里"不碰 ClickHouse、不碰真模型"的部分先落地,证明 harness 在我们的
+setup 下能跑。新增 4 个文件:
+
+| 文件 | 作用 |
+|---|---|
+| `trigger.config.ts` | Trigger.dev 构建配置。**离线测试根本不读它**——vitest 直接 import agent 模块。它只为 `trigger dev`/deploy 服务。`project` 从 env 读(不写死进源码)。 |
+| `src/agent/tools.ts` | `emitVerdict` 工具。**"零散文"的硬通道**:系统提示说"别写段落"是软约束,模型会破;把裁决做成*工具*,模型没有别的出口。 |
+| `trigger/house-agent.ts` | `chat.withClientData().agent()`。整个后端就是这一个 durable task,没有 Next.js API route。 |
+| `trigger/house-agent.test.ts` | 离线测试。假模型脚本化两步:step1 调 `emitVerdict`,step2 收尾。 |
+
+**三个必须自己讲清楚的机制:**
+
+1. **注入缝** `model: clientData?.model ?? getModel()`
+   —— 测试时 `mockChatAgent(agent, { clientData: { model: 假模型 } })` 把假模型塞进去,生产回落到
+   env 开关。一行代码,让整个 agent 逻辑离线可测。
+
+2. **工具输出统一契约:每个工具的 output 就是一个 ViewSpec。**
+   `execute()` 返回完整 ViewSpec → 流给前端渲染;`toModelOutput()` 压成一行 → 只有这行回到模型
+   prompt。同一个工具结果,两个消费者,数据分流(AGENTS.md 不变量 2)。emitVerdict 的
+   `toModelOutput` 返回 `"Verdict delivered to the user."`——模型自己写的话,不必回显给它自己。
+
+3. **tools 声明在 config 上,不只在 streamText 上**(不变量 3)。否则 `toModelOutput` 从第 2 轮起
+   被跳过,原始输出被塞回 prompt。切片 2 的 compareAreas 会把这条压到极限。
+
+**踩的两个坑(都当场修了):**
+
+- **`tool-call` 流块的 `input` 必须是 JSON 字符串,不是对象。** 类型标 `input: unknown`,但运行时
+  SDK 会把它当 provider 流出的原始文本去 parse。传对象 → `tool-input-error` 在 execute 前就炸。
+  改成 `JSON.stringify({...})` 就好。—— 又一次"类型签名骗人、运行时才是真相"。
+- **这个 SDK 版本的 `TriggerConfig` 强制要 `maxDuration`。** 补 `maxDuration: 300`(秒,单轮计算上限;
+  轮次之间挂起不计费不计时)。
+
+**验证:** `npm test` 绿;`npm run typecheck` 干净。断言的是不变量 1(裁决 tile 到了前端 &
+聊天流里零散文),不是"代码不报错"。
+
+**切片 1 没碰的:** 真 ClickHouse、真模型、那个"turn-2 不泄漏"必过测试——全在切片 2。
