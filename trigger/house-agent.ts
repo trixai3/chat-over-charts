@@ -2,7 +2,7 @@ import { chat } from "@trigger.dev/sdk/ai";
 import { streamText, stepCountIs, type LanguageModel } from "ai";
 import { z } from "zod";
 import { getModel } from "../src/shared/model";
-import { emitVerdict } from "../src/agent/tools";
+import { compareAreas, emitVerdict } from "../src/agent/tools";
 
 /**
  * The chat agent. In Trigger.dev's model this single task IS the backend — each
@@ -27,7 +27,7 @@ type ClientData = { model?: LanguageModel };
 // Declared once here, read back typed off the run() payload. Declaring on the
 // config (not just streamText) is what makes each tool's toModelOutput survive
 // history re-conversion from turn 2 onward (AGENTS.md invariant 3).
-const tools = { emitVerdict };
+const tools = { compareAreas, emitVerdict };
 
 const SYSTEM_PROMPT = [
   "You answer questions about UK house prices.",

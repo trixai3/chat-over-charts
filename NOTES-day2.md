@@ -134,3 +134,44 @@ setup 下能跑。新增 4 个文件:
 聊天流里零散文),不是"代码不报错"。
 
 **切片 1 没碰的:** 真 ClickHouse、真模型、那个"turn-2 不泄漏"必过测试——全在切片 2。
+
+---
+
+## 6. 切片 2 —— compareAreas 接 31M 行 + 必过回归测试(仍无需模型 key)
+
+**做了什么:** 第一个碰真数据的工具,加那个"只在多轮才炸"的坑的回归测试。新增/改动:
+
+| 文件 | 作用 |
+|---|---|
+| `src/shared/clickhouse.ts` | 加 `clickhouseKey` + `getClickHouse()` —— ClickHouse 的 `locals` 注入缝 |
+| `src/agent/metrics.ts` | 指标注册表:中位数(不是均值)、5年增长的两个窗口、薄版地理 |
+| `src/agent/tools.ts` | 加 `compareAreas` 工具 |
+| `trigger/no-leak.test.ts` | **必过测试**:连问三轮,断言 turn 2/3 的 prompt 无 ViewSpec JSON |
+
+**先验证 SQL 再写工具**(fixtures-用真数据的规矩)。跑真查询确认形状:
+- Barking and Dagenham +16.9%、Havering +13.1%…(真伦敦区,5年增长)
+- **扫 4,030,464 行 / 355ms** —— county 剪枝生效(只碰伦敦行,不是全 31M)
+- `quantileTDigestIf(0.5)(price, 条件)` 一次扫描出两期中位数;统计头是 `x-clickhouse-summary`
+
+**三个要能自己讲的点:**
+
+1. **ClickHouse 走 `locals`,不走 `clientData`。** 工具**不能**直接调 `clickhouse()`——那会把真客户端焊死、
+   没 key 就没法测。改读 `getClickHouse()`,它从 run 的 `locals` 取。测试用 `setupLocals` 塞假客户端,
+   生产没人塞就懒创建真的。**同一条代码路径,依赖可注入。**为什么不用 `clientData`?那是浏览器来的 wire
+   data;DB 客户端是服务端依赖,归 `locals`(testing.mdx 明说)。
+
+2. **county 先大写再进 SQL。** `county = {param}` 精确匹配 LowCardinality 值 → 命中主键索引剪枝。
+   若用 `upper(county)=...` 做大小写不敏感,会**废掉索引、扫全 31M 行**。(模糊地名解析"London→GREATER
+   LONDON"、"Clapham→消歧 tile"是 Day 3;这工具假设 county 已解析。)
+
+3. **必过测试证明的是不变量 3。** `toModelOutput` 在 turn 1 有效(streamText 当场压),但若 tools 没声明
+   在 config 上,turn 2 起历史重转换时**被跳过**,原始 ComparisonSpec JSON 被塞回 prompt。我们声明在
+   config 上了,测试断言三轮里没有一次 prompt 带 `"metricLabel"`/`"kind":"comparison"`,同时正向断言压缩
+   摘要("Scanned … rows")**在**历史里——区分"压缩了"和"整个没了"。
+
+**给测试验牙(make-it-fail-once 纪律):** 临时把 `compareAreas` 的 `toModelOutput` 改成
+`JSON.stringify(output)`,重跑 → turn 2 的 prompt 里立刻冒出
+`\"kind\":\"comparison\",\"metricLabel\":...`,测试在 `metricLabel` 那行变红。**这正是要防的 bug,被抓到了。**
+改回来,全绿。—— 证明测试有牙,不是摆设。
+
+**切片 2 没碰的:** 真模型、前端 transport、消歧 HITL、下钻。都在后面的切片。key 依然不是阻塞。

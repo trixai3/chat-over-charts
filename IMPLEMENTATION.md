@@ -15,7 +15,7 @@
 | 数据层(ClickHouse) | ✅ 基础完成,🔨 物化视图待建 | 31.35M 行已入我们自己的 schema |
 | 视觉层(tiles + gallery) | ✅ 完成 | 5 种 tile 全部渲染,fixture 用真数据 |
 | 模型层(getModel) | ✅ 完成,🔨 注入口待改 | OpenRouter/Anthropic env 切换 |
-| Agent(chat.agent) | 🔨 骨架跑通 | 切片 1 ✅(emitVerdict+注入缝+离线测试);切片 2 接 CH ⬜ |
+| Agent(chat.agent) | 🔨 双 tool 跑通 | 切片 1 ✅ emitVerdict;切片 2 ✅ compareAreas 接 31M 行 + 必过测试;接真模型/前端 ⬜ |
 | 语义层 | ⬜ 未开始 | 三块,时机不同 —— 见 §4 |
 | 前端接线(transport) | ⬜ 未开始 | Day 2 后半 |
 | 下钻(onAction) | ⬜ 未开始 | Day 4 |
@@ -73,13 +73,13 @@
 - **降级理由:** 我原来把它当"为什么需要 Trigger.dev"的最强论据。但 `chat.agent()` 现在是整个后端,
   Trigger.dev 的存在感不再靠它。所以它从"Day 3 地基"变成"Day 5 锦上添花"——**降低风险**。
 
-### (b) 指标注册表 ⬜ 今天(随第一个 tool)
-- 一个模块定义 "median price""5年增长"。极易。
-- `avg(price)` 是谎言(右偏),必须 `quantileTDigest`。定义一次,防一次。
+### (b) 指标注册表 ✅ 完成(`src/agent/metrics.ts`)
+- 定义了 median price(`quantileTDigestIf`)+ 5年增长两个窗口。
+- `avg(price)` 是谎言(右偏),必须 `quantileTDigest`。定义一次,防一次。✅ 落地
 
-### (c) 维度层级(地理树) ⬜ 薄版今天,完整版 Day 4
-- 薄版:第一个 tool 写死"county 内按 district 分组"
-- 完整版:地理树声明成数据,支撑任意层级下钻(Day 4)
+### (c) 维度层级(地理树) 🔨 薄版 ✅,完整版 Day 4
+- ✅ 薄版:`compareAreas` 里 county 内按 district 分组(`GROUP_LEVEL`/`PARENT_LEVEL`)
+- ⬜ 完整版:地理树声明成数据,支撑任意层级下钻(Day 4)
 
 ---
 
@@ -97,12 +97,14 @@
 5. ✅ **`chat.agent({ tools, run })`** — tools 声明在 config 上,注入缝就位
    - ✅ 离线冒烟测试:假模型调 emitVerdict,断言零散文 + 裁决 tile 到前端(`npm test` 绿)
 
-**切片 2(⬜ 下一步):接 31M 行 + 必过回归测试**
-3. ⬜ **`compareAreas` tool** — 第一个真 tool,ClickHouse 走 `locals` 注入(可离线塞假客户端)
-   - 带上指标注册表(§4b)+ 薄版地理层级(§4c)
-   - `execute` 返回 ComparisonSpec;**`toModelOutput` 压成一行** — 不让 viewSpec 进 prompt
-6. ⬜ **turn-2 回归测试** — 连问三轮,断言 turn 2/3 的 prompt 无 viewSpec JSON
-   - **这是必过测试**(那个只在多轮才炸的坑)—— 用 `mockChatAgent` + `setupLocals` 假 CH,离线
+**切片 2(✅ 完成,仍无需 key):接 31M 行 + 必过回归测试**
+3. ✅ **`compareAreas` tool** — 第一个真 tool,ClickHouse 走 `locals` 注入(`getClickHouse()`/`clickhouseKey`)
+   - ✅ 指标注册表 `src/agent/metrics.ts`(中位数 `quantileTDigestIf`)+ 薄版地理(county→district)
+   - ✅ SQL 已对真数据验证:Barking +16.9% 等,扫 4.03M 行 /355ms(county 剪枝生效)
+   - ✅ `execute` 返回 ComparisonSpec;**`toModelOutput` 压成一行**(无 spec 字段名)
+6. ✅ **turn-2 回归测试** `trigger/no-leak.test.ts` — 连问三轮,断言 turn 2/3 prompt 无 ViewSpec JSON
+   - ✅ **必过、有牙**:临时让 toModelOutput 泄漏 → 测试立刻变红(见 NOTES-day2 §6)
+   - ✅ `mockChatAgent` + `setupLocals` 假 CH,完全离线
 
 **Day 2 收尾于:** 打字提问 → agent 选 tool → 真图流进来。整个产品的瘦版本。
 
