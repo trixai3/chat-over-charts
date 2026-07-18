@@ -175,3 +175,38 @@ setup 下能跑。新增 4 个文件:
 改回来,全绿。—— 证明测试有牙,不是摆设。
 
 **切片 2 没碰的:** 真模型、前端 transport、消歧 HITL、下钻。都在后面的切片。key 依然不是阻塞。
+
+---
+
+## 7. 切片 B —— 前端 transport(页面真正长出来了)
+
+**做了什么:** 把 create-next-app 首页换成真聊天页,tile 从 agent 流进来。新增 3 个文件:
+
+| 文件 | 作用 |
+|---|---|
+| `src/app/actions.ts` | 两个 **server action**:建 session、mint token |
+| `src/components/chat.tsx` | `useTriggerChatTransport` + `useChat`,输入框 + tile 看板 |
+| `src/app/page.tsx` | 首页 = `<Chat/>`(create-next-app 首页删了) |
+
+**要能自己讲的三点:**
+
+1. **server action ≠ API route。** 不变量 7 禁的是 route handler;`useTriggerChatTransport` 用的是
+   Next 的 server action(`"use server"` 函数),这是 SDK 钦定的做法。浏览器永远拿不到 secret key ——
+   两个 action 都在服务端跑。`startChatSession` 幂等(同 chatId 并发收敛到一个 session)。
+
+2. **"output 即 ViewSpec" 的契约在这里收网。** 前端从每条 assistant message 的 tool-output part 里取
+   `part.output`(就是完整 ViewSpec),丢给现成的 `Tile`。compareAreas(comparison)和 emitVerdict
+   (verdict)**走同一条渲染路径**,前端不需要知道任何房价知识。`Tile` 的 `safeParse` 是唯一运行时校验
+   边界(不变量 6)——坏数据 → 破 tile,不白屏。
+
+3. **type-only import 防止服务端代码进浏览器包。** chat.tsx 里
+   `import type { houseAgent }` 只为给 transport 的 task/clientData 上类型;`import type` 编译期抹除,
+   agent 那串服务端依赖(clickhouse/locals/model)不会被打进 client bundle。构建实测证明了这点。
+
+**踩的坑:** `next dev`(Turbopack)对着我之前 `next build` 留下的 `.next` 目录,**所有路由 404**(连
+旧的 /gallery 也 404),但没有报错。清掉 `.next` 重启 dev 就好。—— 记住:**prod 构建产物和 Turbopack
+dev 不能共用一个 `.next`。**
+
+**验证边界(诚实):** 我验到了 —— `npm run build` 通过、类型干净、空状态页面浏览器实测渲染、零 console
+错误。**没验到的** —— 点问题 → 真实 run → tile 流进来。那需要 `npx trigger.dev@latest dev` 连本地
+worker + `.env.local` 的 `OPENROUTER_API_KEY`。没 worker 会一直停在 "Thinking",不是干净测试。这两样是你的。

@@ -17,7 +17,7 @@
 | 模型层(getModel) | ✅ 完成,🔨 注入口待改 | OpenRouter/Anthropic env 切换 |
 | Agent(chat.agent) | 🔨 双 tool 跑通 | 切片 1 ✅ emitVerdict;切片 2 ✅ compareAreas 接 31M 行 + 必过测试;接真模型/前端 ⬜ |
 | 语义层 | ⬜ 未开始 | 三块,时机不同 —— 见 §4 |
-| 前端接线(transport) | ⬜ 未开始 | Day 2 后半 |
+| 前端接线(transport) | 🔨 构建完成 | 切片 B ✅ 页面+transport+tile 看板;真实流式待你的 worker+key 验 |
 | 下钻(onAction) | ⬜ 未开始 | Day 4 |
 | 离线管线(LLM dictionary) | 🟡 可选 | 降级为增强,非地基 —— 见 §4 |
 
@@ -110,14 +110,17 @@
 
 ---
 
-## 6. 前端接线 — transport ⬜ (Day 2 后半)
+## 6. 前端接线 — transport 🔨 (切片 B,构建完成)
 
-- ⬜ `useTriggerChatTransport`(`@trigger.dev/sdk/chat/react`)— 无 API route
-- ⬜ Streams v2(`streams.define().pipe()`)— tile 边算边流进 UI
-- ⬜ 主页面:输入框 + tile 看板(替换掉现在的 create-next-app 首页)
-- ⬜ 等待时显示 tool loop 步骤(不是转圈)
-- ⬜ verdict 骨架卡(先占位,最后填充)
-- ⬜ 停止按钮(`stopSignal`)
+- ✅ 两个 **server actions**(`src/app/actions.ts`)——`startChatSession` + `mintChatAccessToken`。
+  注意:是 server action **不是** API route,不违反不变量 7。
+- ✅ `useTriggerChatTransport`(`@trigger.dev/sdk/chat/react`)—— `src/components/chat.tsx`
+- ✅ 主页面替换掉 create-next-app 首页;tile 看板从 message 的 tool-output part 取 ViewSpec → 复用 `Tile`
+- ✅ 等待时显示 "running the tool loop…"(不是转圈);停止按钮(`stop()`)
+- ✅ 构建/类型/空状态渲染全绿,零 console 错误(浏览器实测)
+- ⬜ **真实流式未验证** —— 需要 `trigger dev` 连本地 worker + `OPENROUTER_API_KEY`(你来)
+- ⬜ Streams v2 自定义 data-* part(当前 tile 走 tool-output part,已够用;进度细分再说)
+- ⬜ 页面刷新恢复(`resume` + 持久化)—— 之后加
 
 ---
 
