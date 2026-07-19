@@ -159,4 +159,41 @@ describe("governed figure pipeline with UK house-price data", () => {
       message: expect.stringContaining("safety result cap"),
     });
   });
+
+  it("renders a distribution by parsing the histogram row into bins", async () => {
+    const plan = planAnalysis({
+      question: "How is median price distributed in Greater London?",
+      sourceId: "uk-house-prices",
+      analysisType: "distribution",
+      measures: ["median price"],
+      dimensions: [],
+      filters: [{ field: "county", operator: "equals", value: "Greater London" }],
+      orderBy: [],
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    const adapter: SourceAdapter = {
+      execute: async () => ({
+        rows: [
+          {
+            bins: [
+              [0, 300000, 58],
+              [300000, 600000, 752],
+              [600000, 1000000, 121],
+            ],
+            median_price: 526890,
+          },
+        ],
+        stats,
+      }),
+    };
+    const result = await runAnalysis(plan, adapter);
+    expect(result.spec.kind).toBe("distribution");
+    if (result.spec.kind !== "distribution") return;
+    expect(result.spec.bins).toEqual([
+      { from: 0, to: 300000, count: 58 },
+      { from: 300000, to: 600000, count: 752 },
+      { from: 600000, to: 1000000, count: 121 },
+    ]);
+    expect(result.spec.median).toBe(526890);
+  });
 });

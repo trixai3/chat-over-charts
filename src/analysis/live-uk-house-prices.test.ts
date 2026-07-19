@@ -59,4 +59,48 @@ describe.skipIf(!hasCredentials)("live UK House Price Paid integration", () => {
       expect(series.points.some((point) => point.v !== 0)).toBe(true);
     }
   }, 30_000);
+
+  it("renders a distribution of price in one district", async () => {
+    const plan = planAnalysis({
+      question: "How are prices distributed in Lambeth?",
+      sourceId: "uk-house-prices",
+      analysisType: "distribution",
+      measures: ["price"],
+      dimensions: [],
+      filters: [{ field: "district", operator: "equals", value: "Lambeth" }],
+      orderBy: [],
+    });
+    if (plan.status !== "ready") throw new Error(`Plan was not ready: ${plan.status}`);
+
+    const result = await runAnalysis(plan);
+    expect(result.spec.kind).toBe("distribution");
+    if (result.spec.kind !== "distribution") return;
+    expect(result.spec.bins.length).toBeGreaterThan(0);
+    expect(result.spec.median).toBeGreaterThan(0);
+    expect(result.spec.stats.rowsRead).toBeGreaterThan(0);
+  }, 30_000);
+
+  it("compares transactions by property type as a pie-compatible figure", async () => {
+    const plan = planAnalysis({
+      question: "Break down transactions by property type",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["transactions"],
+      dimensions: [{ field: "property type" }],
+      filters: [],
+      orderBy: [],
+      preferredFigure: "pie",
+    });
+    if (plan.status !== "ready") throw new Error(`Plan was not ready: ${plan.status}`);
+    expect(plan.figure).toBe("pie");
+
+    const result = await runAnalysis(plan);
+    // Five governed property types is well within the pie policy's 8-slice
+    // cap, so the provisional pie should survive finalizeFigure unchanged.
+    expect(result.spec.kind).toBe("pie");
+    if (result.spec.kind !== "pie") return;
+    expect(result.spec.slices.length).toBeGreaterThan(1);
+    expect(result.spec.slices.every((slice) => slice.value > 0)).toBe(true);
+    expect(result.spec.stats.rowsRead).toBeGreaterThan(0);
+  }, 30_000);
 });

@@ -60,8 +60,11 @@ function profile(
     categoryCount: categories.size,
     timePointCount: times.size,
     seriesCount: category ? categories.size : execution.rows.length > 0 ? 1 : 0,
+    // A distribution is one histogram(20) row for the whole population, like a
+    // single_value query — the row cap it hits is never a truncation signal.
     truncated:
       plan.request.analysisType !== "single_value" &&
+      plan.request.analysisType !== "distribution" &&
       plan.request.limit === undefined &&
       rawRowCount >= resultLimit,
   };
@@ -285,6 +288,130 @@ function buildTable(
   };
 }
 
+function buildPie(
+  rows: Array<Record<string, unknown>>,
+  plan: AnalysisPlan,
+  model: SemanticModel,
+  stats: QueryStats,
+  manifest: ExplanationManifest,
+): ViewSpec {
+  const category = plan.request.dimensions.find(
+    (field) => model.dimensions[field.field].kind === "category",
+  );
+  if (!category) throw new Error("Pie requires a category dimension.");
+  const measure = model.measures[plan.request.measures[0]];
+  return {
+    kind: "pie",
+    title: title(plan, model),
+    metricLabel: displayLabel(measure, plan),
+    format: displayFormat(measure, plan),
+    slices: rows.map((row) => ({
+      label: stringValue(row[category.field]),
+      value: numberValue(row[measure.id], measure.id),
+    })),
+    stats,
+    explanation: manifest,
+  };
+}
+
+function buildScatter(
+  rows: Array<Record<string, unknown>>,
+  plan: AnalysisPlan,
+  model: SemanticModel,
+  stats: QueryStats,
+  manifest: ExplanationManifest,
+): ViewSpec {
+  const category = plan.request.dimensions.find(
+    (field) => model.dimensions[field.field].kind === "category",
+  );
+  if (!category) throw new Error("Scatter requires a category dimension.");
+  const xMeasure = model.measures[plan.request.measures[0]];
+  const yMeasure = model.measures[plan.request.measures[1]];
+  if (!yMeasure) throw new Error("Scatter requires two measures.");
+  return {
+    kind: "scatter",
+    title: title(plan, model),
+    xLabel: displayLabel(xMeasure, plan),
+    yLabel: displayLabel(yMeasure, plan),
+    xFormat: displayFormat(xMeasure, plan),
+    yFormat: displayFormat(yMeasure, plan),
+    points: rows.map((row) => ({
+      label: stringValue(row[category.field]),
+      x: numberValue(row[xMeasure.id], xMeasure.id),
+      y: numberValue(row[yMeasure.id], yMeasure.id),
+    })),
+    stats,
+    explanation: manifest,
+  };
+}
+
+function buildArea(
+  rows: Array<Record<string, unknown>>,
+  plan: AnalysisPlan,
+  model: SemanticModel,
+  stats: QueryStats,
+  manifest: ExplanationManifest,
+): ViewSpec {
+  const time = plan.request.dimensions.find(
+    (field) => model.dimensions[field.field].kind === "time",
+  );
+  if (!time) throw new Error("Area requires a time dimension.");
+  const category = plan.request.dimensions.find(
+    (field) => model.dimensions[field.field].kind === "category",
+  );
+  const measure = model.measures[plan.request.measures[0]];
+  const grouped = new Map<string, Array<{ t: string; v: number }>>();
+  for (const row of rows) {
+    const label = category ? stringValue(row[category.field]) : displayLabel(measure, plan);
+    const points = grouped.get(label) ?? [];
+    points.push({ t: stringValue(row[time.field]), v: numberValue(row[measure.id], measure.id) });
+    grouped.set(label, points);
+  }
+  return {
+    kind: "area",
+    title: title(plan, model),
+    format: displayFormat(measure, plan),
+    series: [...grouped.entries()].map(([label, points]) => ({ label, points })),
+    stats,
+    explanation: manifest,
+  };
+}
+
+function buildDistribution(
+  rows: Array<Record<string, unknown>>,
+  plan: AnalysisPlan,
+  model: SemanticModel,
+  stats: QueryStats,
+  manifest: ExplanationManifest,
+): ViewSpec {
+  const measure = model.measures[plan.request.measures[0]];
+  const rawBins = rows[0]?.bins;
+  if (!Array.isArray(rawBins)) throw new Error("Distribution requires a bins array in the result row.");
+  const bins = rawBins.map((entry) => {
+    const [from, to, height] = entry as [unknown, unknown, unknown];
+    return {
+      from: numberValue(from, "bin.from"),
+      to: numberValue(to, "bin.to"),
+      count: Math.round(numberValue(height, "bin.height")),
+    };
+  });
+  // Median is only meaningful to overlay when the measure IS the median —
+  // any other aggregate returned in the same row would mislabel the marker.
+  const isMedianMeasure = measure.aggregation.toLowerCase().includes("median");
+  const medianRaw = rows[0]?.[measure.id];
+  const median =
+    isMedianMeasure && medianRaw !== undefined ? numberValue(medianRaw, measure.id) : undefined;
+  return {
+    kind: "distribution",
+    title: title(plan, model),
+    format: measure.format,
+    bins,
+    median,
+    stats,
+    explanation: manifest,
+  };
+}
+
 function buildSpec(
   kind: FigureKind,
   execution: QueryExecution,
@@ -301,6 +428,14 @@ function buildSpec(
       return buildComparison(execution.rows, plan, model, execution.stats, manifest);
     case "table":
       return buildTable(execution.rows, plan, model, execution.stats, manifest);
+    case "pie":
+      return buildPie(execution.rows, plan, model, execution.stats, manifest);
+    case "scatter":
+      return buildScatter(execution.rows, plan, model, execution.stats, manifest);
+    case "area":
+      return buildArea(execution.rows, plan, model, execution.stats, manifest);
+    case "distribution":
+      return buildDistribution(execution.rows, plan, model, execution.stats, manifest);
   }
 }
 
@@ -371,6 +506,12 @@ export function summarizeSpec(spec: ViewSpec): string {
       return `Cannot render yet: ${spec.message}`;
     case "distribution":
       return `${spec.bins.length} distribution bins.`;
+    case "pie":
+      return `${spec.slices.length} slices.`;
+    case "scatter":
+      return `${spec.points.length} points.`;
+    case "area":
+      return `${spec.series.length} series.`;
     case "disambiguation":
       return `${spec.candidates.length} candidates require a choice.`;
     case "verdict":

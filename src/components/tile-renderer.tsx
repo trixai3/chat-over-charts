@@ -10,6 +10,9 @@ import { DisambiguationTile } from "./tiles/disambiguation-tile";
 import { KpiTile } from "./tiles/kpi-tile";
 import { TableTile } from "./tiles/table-tile";
 import { NoticeTile } from "./tiles/notice-tile";
+import { PieTile } from "./tiles/pie-tile";
+import { ScatterTile } from "./tiles/scatter-tile";
+import { AreaTile } from "./tiles/area-tile";
 
 export type TileProps = {
   spec: never;
@@ -27,6 +30,9 @@ const RENDERERS = {
   timeseries: TimeseriesTile,
   comparison: ComparisonTile,
   distribution: DistributionTile,
+  pie: PieTile,
+  scatter: ScatterTile,
+  area: AreaTile,
   table: TableTile,
   notice: NoticeTile,
   disambiguation: DisambiguationTile,

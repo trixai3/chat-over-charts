@@ -16,8 +16,14 @@ export const analysisDraftSchema = z.object({
   question: z.string().describe("The user's original analytical question."),
   sourceId: z.string().default("uk-house-prices"),
   analysisType: z
-    .enum(["single_value", "trend", "category_comparison", "detail"])
-    .optional(),
+    .enum(["single_value", "trend", "category_comparison", "detail", "distribution"])
+    .optional()
+    .describe(
+      "The analytical intent. single_value: one headline number ('what is the median in X'). " +
+        "trend: change over ordered time ('how did prices change'). category_comparison: rank or " +
+        "compare groups ('which district is highest'). detail: inspect exact rows. distribution: " +
+        "how values spread within one population ('what do prices look like in X', 'price histogram').",
+    ),
   measures: z
     .array(z.string())
     .default([])
@@ -50,7 +56,18 @@ export const analysisDraftSchema = z.object({
   orderBy: z
     .array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }))
     .default([]),
-  preferredFigure: z.enum(["kpi", "timeseries", "comparison", "table"]).optional(),
+  preferredFigure: z
+    .enum(["kpi", "timeseries", "comparison", "table", "pie", "scatter", "area"])
+    .optional()
+    .describe(
+      "Only set when the user names a chart style or their wording clearly implies one; otherwise " +
+        "omit — the chart policy picks a default and reports compatible alternatives. When to use " +
+        "each: kpi shows one isolated value; timeseries (line) shows continuous change over time; " +
+        "area shows shifts in additive composition over time; comparison (bar) compares categories; " +
+        "pie shows proportional shares of an additive whole (counts, never medians); scatter shows " +
+        "correlation between two measures; table shows exact values. A distribution figure comes " +
+        "from analysisType 'distribution', never from this field.",
+    ),
   limit: z.number().int().min(1).max(1000).optional(),
   seriesSelection: z
     .object({
@@ -71,7 +88,7 @@ export const analysisDraftSchema = z.object({
     ),
 });
 
-function planSummary(plan: AnalysisPlanResult): string {
+export function planSummary(plan: AnalysisPlanResult): string {
   if (plan.status === "ready") {
     return [
       "READY",
@@ -82,6 +99,7 @@ function planSummary(plan: AnalysisPlanResult): string {
       `series=${plan.request.seriesSelection ? `top ${plan.request.seriesSelection.n} by ${plan.request.seriesSelection.by}` : "all"}`,
       `comparison=${plan.request.comparison ?? "none"}`,
       `figure=${plan.figure}`,
+      `alternatives=${plan.figureAlternatives.join(",") || "none"}`,
       `reason=${plan.figureReason}`,
       "Call renderAnalysis with these resolved semantic IDs.",
     ].join("; ");

@@ -288,6 +288,7 @@ const ANALYSIS_LABELS: Record<AnalysisType, string> = {
   trend: "Change over ordered time",
   category_comparison: "Compare categories",
   detail: "Inspect exact rows",
+  distribution: "How values are spread",
 };
 
 export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
@@ -320,7 +321,7 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
   }
 
   // Design §2: never silently guess a material analytical choice. An empty
-  // measure list previously defaulted to the model's median — ask instead.
+  // measure list previously defaulted to the model's default measure — ask instead.
   if (draft.measures.length === 0) {
     return {
       status: "needs_clarification",
@@ -362,8 +363,12 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
   const missingMeasure = measureTerms.find((_, index) => !measures[index]);
   if (missingMeasure) {
     // Design §9.1: the aggregation is material. "average X" must not silently
-    // become a median — surface the governed equivalent and ask.
-    const strippedAggregation = missingMeasure.replace(/^\s*(average|avg|mean)\s+/i, "");
+    // resolve to a differently aggregated governed measure — surface the
+    // governed equivalent and ask.
+    const strippedAggregation = missingMeasure.replace(
+      /^\s*(average|avg|mean|total|sum|maximum|max|minimum|min)\s+/i,
+      "",
+    );
     const aggregationBase = stripChangeWords(strippedAggregation);
     const lossyMatch =
       strippedAggregation !== missingMeasure
@@ -379,7 +384,10 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
         ambiguities: [
           {
             field: "measures",
-            question: `“${missingMeasure}” is not governed here: averages are misleading for right-skewed prices, so this source publishes medians. Use “${lossyMatch.label}”${
+            question: `“${missingMeasure}” is not a governed measure here. ${
+              lossyMatch.aggregationNote ??
+              `The governed equivalent is “${lossyMatch.label}” (${lossyMatch.aggregation}).`
+            } Use “${lossyMatch.label}”${
               aggregationBase.hadChangeWord ? ' with comparison "vs_previous_period"' : ""
             } instead?`,
             options: Object.values(model.measures).map((measure) => ({
@@ -388,7 +396,7 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
               description: measure.description,
             })),
             recommended: lossyMatch.id,
-            reason: "Switching between average and median changes the business meaning, so it needs confirmation.",
+            reason: "Changing the aggregation changes the business meaning, so it needs confirmation.",
           },
         ],
       };
@@ -412,6 +420,31 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     };
   }
 
+  // A distribution bins the raw per-row values of a single measure over one
+  // population — there is no per-row value for a count, and no grouping
+  // dimension to bin against (that would be several distributions, not one).
+  if (draft.analysisType === "distribution") {
+    if (measures.length !== 1) {
+      return {
+        status: "unsupported",
+        reason: "A distribution requires exactly one measure to bin.",
+        suggestions: Object.values(model.measures)
+          .filter((measure) => measure.valueExpression)
+          .map((measure) => measure.id),
+      };
+    }
+    const [measure] = measures;
+    if (!measure!.valueExpression) {
+      return {
+        status: "unsupported",
+        reason: `“${measure!.label}” has no per-row value to bin — it has no valueExpression in the semantic model.`,
+        suggestions: Object.values(model.measures)
+          .filter((candidate) => candidate.valueExpression)
+          .map((candidate) => candidate.label),
+      };
+    }
+  }
+
   let dimensions = draft.dimensions.map((field) => resolveField(field, model));
   const missingDimension = draft.dimensions.find((_, index) => !dimensions[index]);
   if (missingDimension) {
@@ -431,6 +464,14 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
           reason: "Only dimensions and grains supported by the source can be selected.",
         },
       ],
+    };
+  }
+
+  if (draft.analysisType === "distribution" && dimensions.length > 0) {
+    return {
+      status: "unsupported",
+      reason: "A distribution shows one population; use filters to scope it instead of dimensions.",
+      suggestions: ["Remove the dimension and add an equivalent filter instead."],
     };
   }
 
@@ -470,6 +511,9 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     draft.analysisType === "category_comparison" &&
     !dimensions.some((field) => field && model.dimensions[field.field]?.kind === "category")
   ) {
+    const categoryOptions = Object.values(model.dimensions)
+      .filter((dimension) => dimension.kind === "category")
+      .map((dimension) => ({ id: dimension.id, label: dimension.label }));
     return {
       status: "needs_clarification",
       resolved: { ...draft },
@@ -477,10 +521,8 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
         {
           field: "dimensions",
           question: "Which category should be compared?",
-          options: Object.values(model.dimensions)
-            .filter((dimension) => dimension.kind === "category")
-            .map((dimension) => ({ id: dimension.id, label: dimension.label })),
-          recommended: "district",
+          options: categoryOptions,
+          recommended: categoryOptions[0]!.id,
           reason: "A category comparison requires one governed categorical dimension.",
         },
       ],
@@ -697,6 +739,7 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     request,
     figure: figure.kind,
     figureReason: figure.reason,
+    figureAlternatives: figure.alternatives,
   };
 }
 

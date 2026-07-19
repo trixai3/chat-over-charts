@@ -107,4 +107,57 @@ describe("semantic planning", () => {
       remove();
     }
   });
+
+  it("surfaces the governed measure's aggregationNote when 'average' fails to resolve", () => {
+    const plan = planAnalysis({
+      question: "Show average price by district",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["average price"],
+      dimensions: [{ field: "district" }],
+      filters: [],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("needs_clarification");
+    if (plan.status !== "needs_clarification") return;
+    expect(plan.ambiguities[0].recommended).toBe("median_price");
+    expect(plan.ambiguities[0].question).toContain("right-skewed");
+  });
+
+  it("does not mention median for a governed measure without an aggregationNote", () => {
+    const plan = planAnalysis({
+      question: "Show average transactions by district",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["average transactions"],
+      dimensions: [{ field: "district" }],
+      filters: [],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("needs_clarification");
+    if (plan.status !== "needs_clarification") return;
+    expect(plan.ambiguities[0].recommended).toBe("transaction_count");
+    expect(plan.ambiguities[0].question).not.toContain("median");
+    expect(plan.ambiguities[0].question).not.toContain("right-skewed");
+    expect(plan.ambiguities[0].question).toContain("governed equivalent");
+    expect(plan.ambiguities[0].question).toContain("count");
+  });
+
+  it("strips leading 'total' the same way as 'average' to reach the governed measure", () => {
+    const plan = planAnalysis({
+      question: "Show total sales by district",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["total sales"],
+      dimensions: [{ field: "district" }],
+      filters: [],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("needs_clarification");
+    if (plan.status !== "needs_clarification") return;
+    expect(plan.ambiguities[0].recommended).toBe("transaction_count");
+  });
 });

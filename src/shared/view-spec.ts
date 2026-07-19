@@ -128,6 +128,45 @@ const DistributionSpec = z.object({
   explanation: ExplanationManifest,
 });
 
+const PieSpec = z.object({
+  kind: z.literal("pie"),
+  title: z.string(),
+  metricLabel: z.string(),
+  format: ValueFormat,
+  slices: z.array(z.object({ label: z.string(), value: z.number() })).min(2),
+  stats: QueryStats,
+  explanation: ExplanationManifest,
+});
+
+const ScatterSpec = z.object({
+  kind: z.literal("scatter"),
+  title: z.string(),
+  xLabel: z.string(),
+  yLabel: z.string(),
+  xFormat: ValueFormat,
+  yFormat: ValueFormat,
+  points: z.array(z.object({ label: z.string(), x: z.number(), y: z.number() })).min(2),
+  stats: QueryStats,
+  explanation: ExplanationManifest,
+});
+
+/** Same series schema as TimeseriesSpec — an area is a stacked reading of the same data shape. */
+const AreaSpec = z.object({
+  kind: z.literal("area"),
+  title: z.string(),
+  format: ValueFormat,
+  series: z
+    .array(
+      z.object({
+        label: z.string(),
+        points: z.array(z.object({ t: z.string(), v: z.number() })).min(1),
+      }),
+    )
+    .min(1),
+  stats: QueryStats,
+  explanation: ExplanationManifest,
+});
+
 const TableSpec = z.object({
   kind: z.literal("table"),
   title: z.string(),
@@ -173,6 +212,9 @@ export const ViewSpec = z.discriminatedUnion("kind", [
   TimeseriesSpec,
   ComparisonSpec,
   DistributionSpec,
+  PieSpec,
+  ScatterSpec,
+  AreaSpec,
   TableSpec,
   NoticeSpec,
   DisambiguationSpec,

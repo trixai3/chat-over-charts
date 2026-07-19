@@ -70,4 +70,23 @@ describe("ClickHouse semantic compiler", () => {
       max_result_rows: "41",
     });
   });
+
+  it("compiles a distribution as a histogram over the raw per-row value, with no GROUP BY", () => {
+    const plan = planAnalysis({
+      question: "How is median price distributed in Greater London?",
+      sourceId: "uk-house-prices",
+      analysisType: "distribution",
+      measures: ["median price"],
+      dimensions: [],
+      filters: [{ field: "county", operator: "equals", value: "Greater London" }],
+      orderBy: [],
+    });
+    if (plan.status !== "ready") throw new Error("Expected a ready plan");
+    const query = compileClickHouseQuery(plan.request, getSemanticModel(plan.request.sourceId)!);
+
+    expect(query.sql).toContain("histogram(20)(price)");
+    expect(query.sql).not.toContain("GROUP BY");
+    expect(query.sql).toContain("LIMIT 1");
+    expect(query.params.filter_0).toBe("GREATER LONDON");
+  });
 });

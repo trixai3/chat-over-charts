@@ -1,8 +1,21 @@
 import type { QueryStats, ValueFormat, ViewSpec } from "../shared/view-spec";
 
-export type AnalysisType = "single_value" | "trend" | "category_comparison" | "detail";
+export type AnalysisType =
+  | "single_value"
+  | "trend"
+  | "category_comparison"
+  | "detail"
+  | "distribution";
 export type TimeGrain = "day" | "month" | "quarter" | "year";
-export type FigureKind = "kpi" | "timeseries" | "comparison" | "table";
+export type FigureKind =
+  | "kpi"
+  | "timeseries"
+  | "comparison"
+  | "table"
+  | "pie"
+  | "scatter"
+  | "area"
+  | "distribution";
 
 export type FilterOperator = "equals" | "in" | "between" | "gte" | "lte";
 export type FilterValue = string | number | string[] | number[];
@@ -75,6 +88,7 @@ export type AnalysisPlan = {
   request: ResolvedAnalysisRequest;
   figure: FigureKind;
   figureReason: string;
+  figureAlternatives: FigureKind[];
 };
 
 export type AnalysisPlanResult =
@@ -109,6 +123,24 @@ export type SemanticMeasure = {
   version: string;
   synonyms: string[];
   limitations: string[];
+  /**
+   * Shown when a user asks for a different aggregation of this measure (e.g.
+   * "average" when the governed measure is a median). Must explain why the
+   * governed aggregation is the one this source publishes.
+   */
+  aggregationNote?: string;
+  /**
+   * True when values of this measure can be summed across category members
+   * (counts, sums). Pies and stacked areas of non-additive aggregates
+   * (medians) are lies, so the chart policy requires this flag.
+   */
+  additive?: boolean;
+  /**
+   * The raw per-row SQL expression the aggregate summarizes (e.g. "price").
+   * Required to build a distribution; absent for measures with no per-row
+   * value (counts).
+   */
+  valueExpression?: string;
 };
 
 export type SemanticDimension = {

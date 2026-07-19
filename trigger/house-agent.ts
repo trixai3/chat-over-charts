@@ -37,6 +37,8 @@ const SYSTEM_PROMPT = [
   "If it reports NEEDS_CLARIFICATION, call requestClarification relaying its options verbatim.",
   "Never invent clarification questions of your own. When a clarification option's description tells you the exact next call, make that call directly.",
   "If it reports READY, call renderAnalysis using the exact resolved semantic IDs.",
+  "When the user names a chart style, pass it as preferredFigure; the READY summary lists the figure plus compatible alternatives — only switch figures by re-calling renderAnalysis with a preferredFigure from that list.",
+  "Map phrasing to figures: 'share of'/'proportion'/'breakdown' suggests pie, 'correlation'/'X vs Y' suggests scatter, 'spread'/'distribution' of values means analysisType distribution, 'over time' means trend; when nothing is implied, omit preferredFigure.",
   "If the user asks how a measure or value is defined or calculated, call explainSemantics with their term instead of running an analysis.",
   "If the question is unrelated to the connected data or its figures, call no analysis tool; conclude with emitVerdict (tone neutral) saying only governed housing analytics are supported here.",
   "Finish every turn by calling emitVerdict exactly once.",

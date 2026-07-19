@@ -78,6 +78,9 @@ function resultLimit(request: ResolvedAnalysisRequest): number {
       return 101;
     case "trend":
       return MAX_RESULT_ROWS;
+    case "distribution":
+      // histogram(20) always returns one row holding the whole bin array.
+      return 1;
   }
 }
 
@@ -128,6 +131,36 @@ export function compileClickHouseQuery(
     if (!dimension) throw new Error(`Unknown governed filter dimension: ${filter.field}`);
     return compileFilter(filter, dimension, index, params);
   });
+
+  // A distribution bins raw per-row values, not grouped aggregates: same
+  // governed table and WHERE filters, but histogram(20) replaces GROUP BY.
+  // ClickHouse's histogram(20)(expr) returns Array(Tuple(Float64, Float64,
+  // Float64)) = [lower, upper, height] per bin, one row for the whole population.
+  if (request.analysisType === "distribution") {
+    const measureId = request.measures[0];
+    const measure = model.measures[measureId];
+    if (!measure) throw new Error(`Unknown governed measure: ${measureId}`);
+    if (!measure.valueExpression) {
+      throw new Error(`${measure.label} has no per-row value to bin.`);
+    }
+    const limit = resultLimit(request);
+    const sql = [
+      `SELECT\n  histogram(20)(${measure.valueExpression}) AS bins,\n  ${measure.expression} AS ${measureId}`,
+      "FROM {database:Identifier}.{table:Identifier}",
+      filters.length > 0 ? `WHERE ${filters.join("\n  AND ")}` : "",
+      `LIMIT ${limit}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return {
+      sql,
+      params,
+      request,
+      dimensionAliases: [],
+      measureAliases: [measureId],
+      resultLimit: limit,
+    };
+  }
 
   // A confirmed top-N series selection (design §13) scopes the series
   // dimension with a subquery over the same filtered population. It reuses the

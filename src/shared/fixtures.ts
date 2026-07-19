@@ -108,6 +108,86 @@ export const distributionFixture: ViewSpec = {
   explanation,
 };
 
+export const pieFixture: ViewSpec = {
+  kind: "pie",
+  title: "Transactions by property type",
+  metricLabel: "Transactions",
+  format: { style: "number", maximumFractionDigits: 0 },
+  slices: [
+    { label: "Terraced", value: 180000 },
+    { label: "Semi-detached", value: 160000 },
+    { label: "Flat", value: 120000 },
+    { label: "Detached", value: 100000 },
+    { label: "Other", value: 40000 },
+  ],
+  stats: { rowsRead: 31192683, elapsedMs: 41, queryId: "fixture-pie" },
+  explanation,
+};
+
+export const scatterFixture: ViewSpec = {
+  kind: "scatter",
+  title: "London boroughs: median price vs transactions",
+  xLabel: "Median sale price",
+  yLabel: "Transactions",
+  xFormat: { style: "currency", currency: "GBP" },
+  yFormat: { style: "number", maximumFractionDigits: 0 },
+  points: [
+    { label: "WANDSWORTH", x: 630000, y: 121000 },
+    { label: "BARNET", x: 547000, y: 118000 },
+    { label: "LAMBETH", x: 526890, y: 104000 },
+    { label: "EALING", x: 520000, y: 112000 },
+    { label: "BROMLEY", x: 510000, y: 95000 },
+    { label: "LEWISHAM", x: 450000, y: 90000 },
+    { label: "HAVERING", x: 445500, y: 98000 },
+    { label: "CROYDON", x: 410000, y: 105000 },
+  ],
+  stats: { rowsRead: 31192683, elapsedMs: 49, queryId: "fixture-scatter" },
+  explanation,
+};
+
+export const areaFixture: ViewSpec = {
+  kind: "area",
+  title: "Transactions per year by property type",
+  format: { style: "number", maximumFractionDigits: 0 },
+  series: [
+    {
+      label: "Terraced",
+      points: [
+        { t: "2020", v: 12000 },
+        { t: "2021", v: 12500 },
+        { t: "2022", v: 13000 },
+        { t: "2023", v: 12800 },
+        { t: "2024", v: 12600 },
+        { t: "2025", v: 12200 },
+      ],
+    },
+    {
+      label: "Semi-detached",
+      points: [
+        { t: "2020", v: 10000 },
+        { t: "2021", v: 10300 },
+        { t: "2022", v: 10600 },
+        { t: "2023", v: 10400 },
+        { t: "2024", v: 10200 },
+        { t: "2025", v: 9900 },
+      ],
+    },
+    {
+      label: "Flat",
+      points: [
+        { t: "2020", v: 9000 },
+        { t: "2021", v: 9500 },
+        { t: "2022", v: 10000 },
+        { t: "2023", v: 9800 },
+        { t: "2024", v: 9600 },
+        { t: "2025", v: 9200 },
+      ],
+    },
+  ],
+  stats: { rowsRead: 31192683, elapsedMs: 44, queryId: "fixture-area" },
+  explanation,
+};
+
 export const tableFixture: ViewSpec = {
   kind: "table",
   title: "London borough comparison",
@@ -149,6 +229,9 @@ export const ALL_FIXTURES: { name: string; spec: ViewSpec }[] = [
   { name: "comparison", spec: comparisonFixture },
   { name: "timeseries", spec: timeseriesFixture },
   { name: "distribution", spec: distributionFixture },
+  { name: "pie", spec: pieFixture },
+  { name: "scatter", spec: scatterFixture },
+  { name: "area", spec: areaFixture },
   { name: "table", spec: tableFixture },
   { name: "notice", spec: noticeFixture },
   { name: "disambiguation", spec: disambiguationFixture },

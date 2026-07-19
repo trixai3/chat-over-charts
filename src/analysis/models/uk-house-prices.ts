@@ -42,6 +42,9 @@ export const ukHousePrices: SemanticModel = {
       limitations: [
         "Price changes can reflect a changing mix of property types sold as well as market movement.",
       ],
+      aggregationNote:
+        "Averages are misleading for right-skewed prices, so this source publishes the median instead.",
+      valueExpression: "price",
     },
     transaction_count: {
       id: "transaction_count",
@@ -53,6 +56,7 @@ export const ukHousePrices: SemanticModel = {
       version: "1.0.0",
       synonyms: ["sales", "sale count", "transactions", "number of sales", "volume"],
       limitations: [],
+      additive: true,
     },
   },
   dimensions: {
