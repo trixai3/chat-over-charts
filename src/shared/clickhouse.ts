@@ -1,4 +1,5 @@
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
+import { locals } from "@trigger.dev/sdk";
 
 /**
  * The ClickHouse client, configured once.
@@ -40,4 +41,24 @@ function required(name: string): string {
     throw new Error(`${name} is not set. Copy .env.example to .env.local and fill it in.`);
   }
   return v;
+}
+
+/**
+ * The injectable seam for tools that query ClickHouse.
+ *
+ * A tool must NOT call `clickhouse()` directly — that hard-wires the real Cloud
+ * client and makes the tool untestable without credentials. Instead it reads
+ * `getClickHouse()`, which returns whatever the run's `locals` hold. In an
+ * offline test, `mockChatAgent`'s `setupLocals` seeds a fake client under this
+ * key (testing.mdx "Testing against a database"); in production nothing seeds
+ * it, so the first call lazily creates the real one. Same code path, injectable
+ * dependency — this is what lets the turn-2 no-leak test run with zero network.
+ *
+ * `clientData` is NOT the seam for this: that's wire-data from the browser. A DB
+ * client is a server-side dependency, so it goes through `locals`.
+ */
+export const clickhouseKey = locals.create<ClickHouseClient>("clickhouse");
+
+export function getClickHouse(): ClickHouseClient {
+  return locals.get(clickhouseKey) ?? locals.set(clickhouseKey, clickhouse());
 }

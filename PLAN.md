@@ -223,6 +223,16 @@ in, so one physical place wears several administrative names depending on when i
 
 **A naive resolver sends someone asking about Clapham to Bedford. That is demo death.**
 
+> **The resolver splits in two — and this de-risks the plan (decided 18 Jul).** The demo-critical
+> behaviour ("Clapham" → disambiguation, not Bedford) needs **only a live SQL query**, verified:
+> `WHERE locality='CLAPHAM' GROUP BY county, district` returns 5 places in 836ms, biggest in
+> Bedfordshire. **No offline pipeline, no LLM, no dictionary.** That's the Day 3 core.
+>
+> The **offline LLM dictionary** (7,726 localities → `dictGet`) handles what SQL can't — aliases
+> ("north London"), postcodes ("SW4"), misspellings, defunct-district collapse. It was sold as the
+> *"why Trigger.dev matters"* story, but `chat.agent()` is now the whole backend, so Trigger.dev no
+> longer depends on it. **Demoted from Day-3 foundation to Day-5 enhancement.** See IMPLEMENTATION §4a.
+
 **b) A metrics registry.** One module defining "median price", "5-year growth", etc.
 `avg(price)` is a *lie* on house prices — the distribution is heavily skewed (`other` averages
 £1.18M). Median via `quantileTDigest` is honest. Define it once, defend it once.
@@ -360,6 +370,27 @@ row is load-bearing; none is decoration.
 saves nothing and weakens the pitch. **Do not put this in the pitch.** *(Note the distinction: the
 **offline** batch fan-out over 7,726 localities is kept and is genuinely justified — those are slow
 LLM calls, not fast queries.)*
+
+#### Which of Trigger.dev's canonical purposes do we actually lean on?
+
+The table above lists the *features* we touch. This one answers a sharper question: Trigger.dev is
+sold as a **background-job runtime** — long windows, retries, realtime logging, webhook/event
+triggers. Of those four, how many are load-bearing *for us*? Honest answer: **two, hard; two,
+incidental.** That's a deliberate bet on Trigger.dev's *new* face (`chat.agent()` as a durable
+conversation runtime) over its *old* face (cron + webhooks + retries).
+
+| Canonical purpose | Do we lean on it? | Weight |
+|---|---|---|
+| **Long execution window** | Yes — but inverted. Not long *compute*; a run that **suspends to wait on a human at zero cost**. The no-`execute` disambiguation tool parks the run — unbilled, no concurrency slot, `maxDuration` stops ticking — plus the session survives refresh/deploy. | ★★★ load-bearing |
+| **Realtime progress** | Yes, strongly. Streams v2 pushes tiles into the UI as they land; the wait shows *tool-loop steps*, not a spinner; `useTriggerChatTransport` runs `useChat` over Realtime with no API routes. | ★★★ load-bearing |
+| **Retry logic** | Barely. A ~50ms ClickHouse query needs none; the only real retry story is the *optional* monthly-ingest batch. If a judge expects "watch it retry," we don't have that beat. | ★ incidental |
+| **Webhook / event trigger** | Barely. Our trigger is a user typing (frontend → `session.in`). The only genuine scheduled trigger is `schedules.task()` monthly ingest — 🟡 optional/demoted. | ★ incidental |
+
+**The one hard rebuttal to "why not just a plain Next.js app?"** Hand-rolling *suspend-a-run-to-wait-
+on-a-human-for-free* + *multi-turn session that survives refresh/deploy* + *reconnecting stream
+replay* is a whole state-store-plus-resumption-plus-replay stack. `chat.agent()` gives it for free.
+The Clapham beat (§5.5, and the dashboard waitpoint at §11) is where that becomes visible in 20
+seconds — which is the point, since "meaningful use" is judged on camera, not asserted in a README.
 
 ### 5.5 The user experience — Next.js on Vercel
 
@@ -755,7 +786,8 @@ For the app itself — separate from the Claude Code subscription.
 | Tool declaration site | On `chat.agent({ tools })`, read back from `run()` payload | Docs: config-less tools skip `toModelOutput` **from turn 2 onward** and stringify raw output into the prompt. A bug invisible in one-question testing. |
 | ClickHouse instance | Our own Cloud, not playground | Owning the schema is what 25% rewards |
 | Semantic layer | **Thin** — resolver + metrics + hierarchy | Full semantic model is a week; resolver is demo-critical |
-| Place resolution | ClickHouse dictionary, LLM-built offline | 62% of localities ambiguous; naive match returns Bedford |
+| Place resolution — core | **Live SQL ambiguity check** (18 Jul) | Verified 836ms; no offline pipeline needed for the demo-critical path |
+| Place resolution — enhancement | ClickHouse dictionary, LLM-built offline | Handles aliases/postcodes/misspellings. **Demoted to optional** — chat.agent carries the Trigger.dev story now |
 | **Agent runtime** | **`chat.agent()`** (17 Jul) | GA 15 days before the hackathon — this event is its showcase. Trigger.dev *is* the backend; no API routes. |
 | Pattern track | `/docs/ai-chat/*`, **not** `/guides/ai-agents` | Handbook names `chat.agent()`; the guides track is older |
 | Disambiguation | No-`execute` tool (HITL pause) | The chip tile *is* Trigger.dev's HITL primitive |
@@ -768,3 +800,23 @@ For the app itself — separate from the Claude Code subscription.
 | **Query-time fan-out** | **Dropped** (17 Jul) | ClickHouse answers in ~50ms — parallelism saves nothing |
 | Offline batch fan-out | **Kept** | 7,726 slow LLM calls — genuinely parallel and expensive |
 | Agent skills | Project-level install | Hackathon-specific; avoid polluting global tx-skills |
+| **Scope direction** | **Deepen within one dataset, don't go cross-domain generic** (19 Jul) | After the first live run, one tool felt too limited. Root cause was "only 1 tool," not "it's about houses." The architecture (ViewSpec, tile renderer, chat.agent, constrained-tool pattern) is **already domain-agnostic** — only the tools are housing-specific. Add chart-kind tools (timeseries, distribution, extend compare); make generality a **pitch property** ("this pattern works for any dataset, here it's UK housing"), not a build target. A generic LLM-writes-SQL engine was rejected: it breaks invariant 5 (hallucination), loses the ClickHouse-depth story, and can't ship in 4 solo days. |
+
+### 12.1 Open questions — decide before building the chart-kind tools (19 Jul)
+
+Raised in a re-planning discussion; **not yet resolved**. Trish paused here.
+
+1. **Breadth vs demo focus.** More tools = more user questions that hit an uncovered
+   combination. Optimise for "answers many shapes" or "one rehearsed demo path + a few solid
+   shapes"? Different bets for a hackathon.
+2. **Place/level resolution ordering.** "Wigan" is a *district*, not a county — timeseries/
+   distribution over "any place" need to know its level and parent. That's what the
+   disambiguation-HITL slice solves. **Open: resolve places first, then add chart kinds? Or add
+   chart kinds first and keep hitting the Wigan-style boundary?** *(Tentative lean: resolution
+   first — even a pure-SQL version — so every later tool naturally eats "any place".)*
+3. **"Lowest price" semantics.** The whole design is medians (a single cheapest sale is noise).
+   Do we honour a literal `min`, or reframe to median-over-time? A product-values call: "true
+   trend" vs "answer anything, even a misleading number".
+4. **Demo climax.** Adding chart kinds widens capability but doesn't itself create a wow moment.
+   What's the peak beat after deepening — a continuous compare → drill → timeline → distribution
+   walk in one conversation, or something else?
