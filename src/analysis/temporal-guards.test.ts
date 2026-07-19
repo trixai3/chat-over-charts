@@ -77,6 +77,56 @@ describe("the one temporal rule: comparison requires ordered periods", () => {
   });
 });
 
+describe("recency guard: 'latest' must map to a governed window", () => {
+  const latestDraft = (filters: Array<{ field: string; operator: "equals" | "gte"; value: string }>) => ({
+    question: "For detached houses, get top 10 district with latest median price in London",
+    sourceId: "uk-house-prices",
+    analysisType: "category_comparison" as const,
+    measures: ["latest median price"],
+    dimensions: [{ field: "district" }],
+    filters: [
+      { field: "county", operator: "equals" as const, value: "Greater London" },
+      { field: "property type", operator: "equals" as const, value: "detached" },
+      ...filters,
+    ],
+    orderBy: [],
+    limit: 10,
+  });
+
+  it("asks which window 'latest' means when nothing pins it", () => {
+    const plan = planAnalysis(latestDraft([]));
+    expect(plan.status).toBe("needs_clarification");
+    if (plan.status !== "needs_clarification") return;
+    expect(plan.ambiguities[0].field).toBe("filters");
+    expect(plan.ambiguities[0].recommended).toBe("trailing_12_months");
+    // Options are anchored to the source's real freshness, not today's date.
+    expect(plan.ambiguities[0].options[0].description).toContain("2025-05-29");
+  });
+
+  it("passes silently once a time filter pins the window", () => {
+    const plan = planAnalysis(
+      latestDraft([{ field: "date", operator: "gte", value: "2025-05-29" }]),
+    );
+    expect(plan.status).toBe("ready");
+    if (plan.status !== "ready") return;
+    // "latest median price" resolved to the base measure via recency stripping.
+    expect(plan.request.measures).toEqual(["median_price"]);
+  });
+
+  it("does not fire on trends — the time dimension shows every period", () => {
+    const plan = planAnalysis({
+      question: "How have prices changed recently in Lambeth?",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["price change"],
+      dimensions: [{ field: "sale_date", grain: "year" }],
+      filters: [{ field: "district", operator: "equals", value: "Lambeth" }],
+      orderBy: [],
+    });
+    expect(plan.status).toBe("ready");
+  });
+});
+
 describe("pre-query series scope (design §5.4/§9.1)", () => {
   it("asks for a series scope before querying a wide category trend", () => {
     const plan = planAnalysis({

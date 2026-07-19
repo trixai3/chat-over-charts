@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { planAnalysis } from "../analysis/semantic-model";
+import { explainSemanticTerm, planAnalysis } from "../analysis/semantic-model";
 import { runAnalysis, summarizeSpec } from "../analysis/pipeline";
 import type { AnalysisPlanResult } from "../analysis/types";
 import type { ViewSpec } from "../shared/view-spec";
@@ -169,6 +169,29 @@ export const renderAnalysis = tool({
   }),
 });
 
+/**
+ * Definition questions ("how did you calculate X?") are answered from the
+ * semantic layer alone — no SQL runs, and the reply is still a tile, not prose.
+ */
+export const explainSemantics = tool({
+  description:
+    "Explain how a governed measure or dimension is defined and calculated, using only the semantic layer. " +
+    "Use when the user asks how a value was calculated or what a term means. Never runs a query. " +
+    "Do not use for questions unrelated to the connected data.",
+  inputSchema: z.object({
+    sourceId: z.string().default("uk-house-prices"),
+    term: z.string().describe("The measure or dimension the user asked about, in their words."),
+  }),
+  execute: async ({ sourceId, term }): Promise<ViewSpec> => explainSemanticTerm(sourceId, term),
+  toModelOutput: ({ output }) => ({
+    type: "text",
+    value:
+      (output as ViewSpec).kind === "notice"
+        ? `Definition tile shown: ${(output as Extract<ViewSpec, { kind: "notice" }>).title}`
+        : "Definition tile shown.",
+  }),
+});
+
 /** The only final answer channel; loose assistant prose remains forbidden. */
 export const emitVerdict = tool({
   description:
@@ -192,5 +215,6 @@ export const analysisTools = {
   inspectAnalysis,
   requestClarification,
   renderAnalysis,
+  explainSemantics,
   emitVerdict,
 };

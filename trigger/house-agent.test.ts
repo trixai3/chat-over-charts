@@ -67,6 +67,7 @@ describe("governed analysis agent", () => {
       "inspectAnalysis",
       "requestClarification",
       "renderAnalysis",
+      "explainSemantics",
       "emitVerdict",
     ]);
     expect(Object.keys(analysisTools)).not.toContain("compareAreas");

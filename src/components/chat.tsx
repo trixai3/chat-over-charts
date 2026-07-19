@@ -22,7 +22,9 @@ function toolOutputs(parts: readonly unknown[]): unknown[] {
       if (typeof part !== "object" || part === null) return false;
       const candidate = part as { type?: unknown; state?: unknown; output?: unknown };
       return (
-        (candidate.type === "tool-renderAnalysis" || candidate.type === "tool-emitVerdict") &&
+        (candidate.type === "tool-renderAnalysis" ||
+          candidate.type === "tool-explainSemantics" ||
+          candidate.type === "tool-emitVerdict") &&
         candidate.state === "output-available" &&
         candidate.output !== undefined
       );
@@ -79,6 +81,41 @@ function pendingClarifications(parts: readonly unknown[]): PendingClarification[
       options,
     }];
   });
+}
+
+/**
+ * The run's progress, read straight from the streamed tool parts — each tool
+ * call IS a pipeline stage, so no extra progress channel is needed.
+ */
+const ACTIVITY_STEPS: Record<string, { active: string; done: string }> = {
+  "tool-inspectAnalysis": {
+    active: "Resolving semantics…",
+    done: "Semantic plan ready · deciding next step…",
+  },
+  "tool-requestClarification": {
+    active: "Preparing a clarification…",
+    done: "Waiting for your choice…",
+  },
+  "tool-renderAnalysis": {
+    active: "Querying ClickHouse · validating dataset…",
+    done: "Figure rendered · deciding next step…",
+  },
+  "tool-explainSemantics": {
+    active: "Reading the semantic layer…",
+    done: "Definition ready · deciding next step…",
+  },
+  "tool-emitVerdict": { active: "Writing the verdict…", done: "Verdict delivered" },
+};
+
+function activityLabel(parts: readonly unknown[]): string {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index] as { type?: unknown; state?: unknown } | null;
+    if (typeof part?.type !== "string") continue;
+    const step = ACTIVITY_STEPS[part.type];
+    if (!step) continue;
+    return part.state === "output-available" ? step.done : step.active;
+  }
+  return "Reading the question…";
 }
 
 function messageText(parts: readonly unknown[]): string {
@@ -205,7 +242,10 @@ export function Chat() {
           })}
           {isStreaming && (
             <p className="animate-pulse text-xs text-black/40 dark:text-white/40">
-              Resolving semantics · planning query · validating figure…
+              {activityLabel(
+                [...messages].reverse().find((message) => message.role === "assistant")
+                  ?.parts ?? [],
+              )}
             </p>
           )}
         </div>

@@ -143,6 +143,32 @@ already available"). Two refinements:
 
 Verified in the browser: the Lambeth chip now goes question → figure with zero clarifications.
 
+### 8. Testing round 2: recency guard, definition questions, live process (19 July, evening)
+
+Three refinements from user testing on the `test-process-with-more` branch:
+
+- **"Latest" is a window choice, not a word to drop.** "Top 10 districts with latest median
+  price" sailed through with an all-time median because nothing questioned the recency word. The
+  fix is a deterministic guard in `planAnalysis` (never a prompt — DeepSeek proved prompts get
+  ignored): a snapshot question using latest/current/recent with no time filter returns a
+  clarification whose options are anchored to the source's real freshness — trailing 12 months
+  (recommended), latest full year, all time. "Latest median price" as a measure term resolves to
+  the base measure via recency-word stripping so only ONE question is asked, about the window.
+- **"How did you calculate X?" is now answerable.** `explainSemantics` (new tool in
+  `src/agent/tools.ts`, resolver in `semantic-model.ts`) reads the semantic layer only — no SQL —
+  and renders a definition tile: description, aggregation, expression, version, source freshness,
+  limitations. Ungoverned terms are refused with the governed vocabulary as suggestions;
+  off-topic questions are refused via a neutral verdict (system prompt).
+- **The process streams.** The static "Resolving semantics · planning query…" line in `chat.tsx`
+  now derives from the streamed tool parts — each tool call IS a pipeline stage, so the label
+  tracks the run live (resolving → querying → validating → verdict) with no extra channel.
+- Prompt hardening: the agent is told never to invent its own clarification questions — it
+  relays inspectAnalysis options verbatim and acts on option descriptions directly.
+
+Ops note for local dev: after switching worktrees, `preview_start` kept launching `next dev`
+from the *old* worktree path (stale frontend, current worker — confusing to debug). The dev
+server must run from the active worktree; verify with `lsof -p <pid> | grep cwd`.
+
 ## What the fixed flow does for the original question
 
 1. `inspectAnalysis` with "average price change" → clarification: *averages aren't governed here

@@ -1,3 +1,4 @@
+import type { ViewSpec } from "../shared/view-spec";
 import { ukHousePrices } from "./models/uk-house-prices";
 import type {
   AnalysisDraft,
@@ -35,6 +36,21 @@ export function registerSemanticModel(model: SemanticModel): () => void {
 
 function normalized(value: string): string {
   return value.trim().toLowerCase().replaceAll("_", " ").replaceAll("-", " ");
+}
+
+/** Words that mean "a time window", never part of a governed measure name. */
+const RECENCY_WORDS = /\b(latest|current|recent|newest|now|nowadays|today)\b/gi;
+
+export function stripRecencyWords(term: string): string {
+  return term.replace(RECENCY_WORDS, " ").replace(/\s+/g, " ").trim();
+}
+
+function stripChangeWords(term: string) {
+  const base = term
+    .replace(/\b(change|changes|growth|grew|increase|decrease|delta)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { base, hadChangeWord: normalized(base) !== normalized(term) };
 }
 
 function resolveEntry<T extends SemanticMeasure | SemanticDimension>(
@@ -328,17 +344,14 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
   // "price change" / "sales growth" is a base measure plus the query-time
   // comparison, not its own measure — resolving it that way is exact, so no
   // clarification is needed (measures stay plain aggregates).
-  const stripChangeWords = (term: string) => {
-    const base = term
-      .replace(/\b(change|changes|growth|grew|increase|decrease|delta)\b/gi, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    return { base, hadChangeWord: normalized(base) !== normalized(term) };
-  };
   let comparison = draft.comparison;
   const measureTerms = draft.measures;
   const measures = measureTerms.map((term) => {
-    const direct = resolveEntry(term, model.measures);
+    const direct =
+      resolveEntry(term, model.measures) ??
+      // "latest median price" = the median measure; the recency word is a time
+      // window, handled by the recency guard below in this same pass.
+      resolveEntry(stripRecencyWords(term), model.measures);
     if (direct) return direct;
     const { base, hadChangeWord } = stripChangeWords(term);
     if (!hadChangeWord || base.length === 0) return undefined;
@@ -531,6 +544,60 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     (resolution) => (resolution as Extract<FilterResolution, { status: "ok" }>).filter,
   );
 
+  // "Latest/current/recent" is a time window, not a measure. On a snapshot
+  // question (no displayed time dimension) with no time filter pinning the
+  // window, the choice materially changes the population — ask, with options
+  // anchored to the source's actual freshness (design §9.1 "time range").
+  // Deterministic on purpose: prompt wording cannot be trusted to catch this.
+  const recency = /\b(latest|current|recent|newest|now|nowadays|today)\b/i;
+  const timeDimensionId = model.defaults.timeDimension;
+  const hasTimeBound = filters.some(
+    (filter) =>
+      filter.field === timeDimensionId &&
+      (filter.operator === "gte" || filter.operator === "lte" || filter.operator === "between"),
+  );
+  if (
+    timeDimensionId &&
+    !hasTimeDimension &&
+    !hasTimeBound &&
+    (recency.test(draft.question) || draft.measures.some((term) => recency.test(term)))
+  ) {
+    const [year, month, day] = model.lastRefresh.split("-");
+    const trailingStart = `${Number(year) - 1}-${month}-${day}`;
+    const lastFullYear = String(Number(year) - 1);
+    const allTimeStart = model.availableRange?.[0] ?? "1900-01-01";
+    return {
+      status: "needs_clarification",
+      resolved: { ...draft },
+      ambiguities: [
+        {
+          field: "filters",
+          question: `“Latest” needs a governed time window — the data ends ${model.lastRefresh}. Which window should be used?`,
+          options: [
+            {
+              id: "trailing_12_months",
+              label: `Trailing 12 months (${trailingStart} → ${model.lastRefresh})`,
+              description: `Call inspectAnalysis again with filter ${timeDimensionId} gte "${trailingStart}".`,
+            },
+            {
+              id: "latest_full_year",
+              label: `Latest full year (${lastFullYear})`,
+              description: `Call inspectAnalysis again with filter ${timeDimensionId} equals "${lastFullYear}".`,
+            },
+            {
+              id: "all_time",
+              label: `All records (since ${allTimeStart})`,
+              description: `Call inspectAnalysis again with filter ${timeDimensionId} gte "${allTimeStart}".`,
+            },
+          ],
+          recommended: "trailing_12_months",
+          reason:
+            "Without an explicit window, “latest” would silently become an all-time aggregate.",
+        },
+      ],
+    };
+  }
+
   // Design §5.4/§9.1: consult capability metadata BEFORE querying. A trend
   // over a wide category must not run, hit the row cap, and dead-end — it asks
   // for a supported series scope instead.
@@ -630,5 +697,73 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     request,
     figure: figure.kind,
     figureReason: figure.reason,
+  };
+}
+
+/**
+ * Answers "how did you calculate X?" from the semantic layer alone — no SQL
+ * runs. The governed definition, aggregation, expression, provenance, and
+ * limitations already exist in the model; this just renders them as a tile.
+ */
+export function explainSemanticTerm(sourceId: string, term: string): ViewSpec {
+  const model = getSemanticModel(sourceId);
+  if (!model) {
+    return {
+      kind: "notice",
+      title: "Unknown data source",
+      message: `No semantic model is registered as “${sourceId}”.`,
+      tone: "warning",
+      suggestions: listSemanticModels().map((item) => item.id),
+    };
+  }
+
+  const stripped = stripRecencyWords(term);
+  const measure =
+    resolveEntry(term, model.measures) ?? resolveEntry(stripped, model.measures);
+  if (measure) {
+    const recencyNote =
+      stripped !== term.trim()
+        ? " Words like “latest” are not part of the measure — they become a governed date filter chosen per question."
+        : "";
+    return {
+      kind: "notice",
+      title: `How “${measure.label}” is calculated`,
+      message:
+        `${measure.description} Aggregation: ${measure.aggregation}. ` +
+        `SQL expression: ${measure.expression}. ` +
+        `Definition version ${measure.version}; source ${model.sourceSystem}, refreshed ${model.lastRefresh}.` +
+        recencyNote,
+      tone: "neutral",
+      suggestions: measure.limitations,
+    };
+  }
+
+  const dimension = resolveEntry(term, model.dimensions);
+  if (dimension) {
+    return {
+      kind: "notice",
+      title: `What “${dimension.label}” means`,
+      message:
+        `${dimension.description} Kind: ${dimension.kind}. ` +
+        (dimension.values
+          ? `${dimension.values.length} governed values snapshotted from the source. `
+          : "") +
+        (dimension.grains
+          ? `Supported grains: ${Object.keys(dimension.grains).join(", ")}.`
+          : ""),
+      tone: "neutral",
+      suggestions: [],
+    };
+  }
+
+  return {
+    kind: "notice",
+    title: `“${term}” is not a governed concept`,
+    message: "Only measures and dimensions defined in the semantic layer can be explained.",
+    tone: "warning",
+    suggestions: [
+      ...Object.values(model.measures).map((item) => item.label),
+      ...Object.values(model.dimensions).map((item) => item.label),
+    ],
   };
 }
