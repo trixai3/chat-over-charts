@@ -71,6 +71,23 @@ describe("ClickHouse semantic compiler", () => {
     });
   });
 
+  it("lifts a trend's default limit far above the category/detail caps", () => {
+    const plan = planAnalysis({
+      question: "Show Lambeth prices by day since 2015",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["median price"],
+      dimensions: [{ field: "sale_date", grain: "day" }],
+      filters: [{ field: "district", operator: "equals", value: "Lambeth" }],
+      orderBy: [],
+    });
+    if (plan.status !== "ready") throw new Error("Expected a ready plan");
+    const query = compileClickHouseQuery(plan.request, getSemanticModel(plan.request.sourceId)!);
+
+    expect(query.sql).toContain("LIMIT 100000");
+    expect(query.resultLimit).toBe(100_000);
+  });
+
   it("compiles a distribution as a histogram over the raw per-row value, with no GROUP BY", () => {
     const plan = planAnalysis({
       question: "How is median price distributed in Greater London?",

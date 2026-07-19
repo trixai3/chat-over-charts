@@ -160,4 +160,130 @@ describe("semantic planning", () => {
     if (plan.status !== "needs_clarification") return;
     expect(plan.ambiguities[0].recommended).toBe("transaction_count");
   });
+
+  it("catches 'average' even when the model already rewrote the term to a governed synonym", () => {
+    // "prices" is median_price's own synonym, so it resolves directly — the
+    // lossy-aggregation guard above never sees an unresolved term to catch.
+    const plan = planAnalysis({
+      question: "Show Lambeth average prices by day since 2015",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["prices"],
+      dimensions: [{ field: "sale_date", grain: "day" }],
+      filters: [{ field: "district", operator: "equals", value: "Lambeth" }],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("needs_clarification");
+    if (plan.status !== "needs_clarification") return;
+    expect(plan.ambiguities[0].question).toContain("right-skewed");
+    expect(plan.ambiguities[0].recommended).toBe("median_price");
+  });
+
+  it("lets a verbatim governed id through even after 'average' language — the confirmed escape hatch", () => {
+    const plan = planAnalysis({
+      question: "Show Lambeth average prices by day since 2015",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["median_price"],
+      dimensions: [{ field: "sale_date", grain: "day" }],
+      filters: [{ field: "district", operator: "equals", value: "Lambeth" }],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("ready");
+  });
+
+  it("still asks for a governed measure without an aggregationNote, but doesn't invoke the median policy", () => {
+    const plan = planAnalysis({
+      question: "average transactions per district",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["transactions"],
+      dimensions: [{ field: "district" }],
+      filters: [],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("needs_clarification");
+    if (plan.status !== "needs_clarification") return;
+    expect(plan.ambiguities[0].question).not.toContain("median");
+    expect(plan.ambiguities[0].question).not.toContain("right-skewed");
+  });
+
+  it("does not overfire the average guard when the question has no average wording", () => {
+    const plan = planAnalysis({
+      question: "Show Lambeth prices by day since 2015",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["prices"],
+      dimensions: [{ field: "sale_date", grain: "day" }],
+      filters: [{ field: "district", operator: "equals", value: "Lambeth" }],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("ready");
+  });
+
+  it("resolves the plural 'median prices' via the singularization fallback", () => {
+    const plan = planAnalysis({
+      question: "What are median prices in Lambeth?",
+      sourceId: "uk-house-prices",
+      analysisType: "single_value",
+      measures: ["median prices"],
+      dimensions: [],
+      filters: [{ field: "district", operator: "equals", value: "Lambeth" }],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("ready");
+    if (plan.status !== "ready") return;
+    expect(plan.request.measures).toEqual(["median_price"]);
+  });
+
+  it("resolves the plural 'sale prices' too", () => {
+    const plan = planAnalysis({
+      question: "What are sale prices in Lambeth?",
+      sourceId: "uk-house-prices",
+      analysisType: "single_value",
+      measures: ["sale prices"],
+      dimensions: [],
+      filters: [{ field: "district", operator: "equals", value: "Lambeth" }],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("ready");
+    if (plan.status !== "ready") return;
+    expect(plan.request.measures).toEqual(["median_price"]);
+  });
+
+  it("still resolves the already-plural registered synonym 'transactions' (exact pass, unaffected by the fallback)", () => {
+    const plan = planAnalysis({
+      question: "Show transactions by district",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["transactions"],
+      dimensions: [{ field: "district" }],
+      filters: [],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("ready");
+    if (plan.status !== "ready") return;
+    expect(plan.request.measures).toEqual(["transaction_count"]);
+  });
+
+  it("still asks for clarification when an unknown term (plural or not) matches no governed synonym", () => {
+    const plan = planAnalysis({
+      question: "Show widgets by district",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["widgets"],
+      dimensions: [{ field: "district" }],
+      filters: [],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("needs_clarification");
+  });
 });

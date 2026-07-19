@@ -118,6 +118,15 @@ function activityLabel(parts: readonly unknown[]): string {
   return "Reading the question…";
 }
 
+/** emitVerdict is the only terminal step (AGENTS.md invariant 1) — its absence means the run ended without one. */
+function hasCompletedVerdict(parts: readonly unknown[]): boolean {
+  return parts.some((part) => {
+    if (typeof part !== "object" || part === null) return false;
+    const candidate = part as { type?: unknown; state?: unknown };
+    return candidate.type === "tool-emitVerdict" && candidate.state === "output-available";
+  });
+}
+
 function messageText(parts: readonly unknown[]): string {
   return parts
     .filter(
@@ -156,6 +165,16 @@ export function Chat() {
   const onDrill = (target: DrillTarget) => console.log("drill placeholder:", target);
   const isStreaming = status === "streaming" || status === "submitted";
   const empty = messages.length === 0;
+  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+  const lastAssistantParts = lastAssistant?.parts ?? [];
+  // stepCountIs(15) can end the run with no emitVerdict (AGENTS.md invariant 3
+  // pitfall) — without this, the process line stays on the last tool's "…
+  // deciding next step…" label forever, since only a verdict sets a terminal one.
+  const runEndedWithoutVerdict =
+    !isStreaming &&
+    lastAssistant !== undefined &&
+    !hasCompletedVerdict(lastAssistantParts) &&
+    pendingClarifications(lastAssistantParts).length === 0;
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-6 py-10">
@@ -240,12 +259,15 @@ export function Chat() {
               </div>
             );
           })}
-          {isStreaming && (
-            <p className="animate-pulse text-xs text-black/40 dark:text-white/40">
-              {activityLabel(
-                [...messages].reverse().find((message) => message.role === "assistant")
-                  ?.parts ?? [],
-              )}
+          {(isStreaming || runEndedWithoutVerdict) && (
+            <p
+              className={`text-xs text-black/40 dark:text-white/40 ${
+                isStreaming ? "animate-pulse" : ""
+              }`}
+            >
+              {isStreaming
+                ? activityLabel(lastAssistantParts)
+                : "Run ended without a verdict — try narrowing the question."}
             </p>
           )}
         </div>

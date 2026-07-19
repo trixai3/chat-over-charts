@@ -10,6 +10,10 @@ import type {
 } from "./types";
 
 const MAX_RESULT_ROWS = 1000;
+// A trend's row count is structurally bounded by time buckets × the 8-series
+// policy cap (worst case ~daily 1995–2026 × 8 ≈ 92k) — this cap is a safety
+// net against grain bugs, not a scope limit, so it sits well above that bound.
+const MAX_TREND_ROWS = 100_000;
 
 function normalizedValue(value: unknown, dimension: SemanticDimension): unknown {
   if (typeof value === "string") {
@@ -77,7 +81,7 @@ function resultLimit(request: ResolvedAnalysisRequest): number {
       // One extra sentinel row proves that the default table scope is too broad.
       return 101;
     case "trend":
-      return MAX_RESULT_ROWS;
+      return MAX_TREND_ROWS;
     case "distribution":
       // histogram(20) always returns one row holding the whole bin array.
       return 1;

@@ -41,6 +41,9 @@ function normalized(value: string): string {
 /** Words that mean "a time window", never part of a governed measure name. */
 const RECENCY_WORDS = /\b(latest|current|recent|newest|now|nowadays|today)\b/gi;
 
+/** Words that claim a mean — the aggregation this source deliberately avoids for skewed measures. */
+const AVERAGE_WORDS = /\b(average|avg|mean)\b/i;
+
 export function stripRecencyWords(term: string): string {
   return term.replace(RECENCY_WORDS, " ").replace(/\s+/g, " ").trim();
 }
@@ -53,17 +56,37 @@ function stripChangeWords(term: string) {
   return { base, hadChangeWord: normalized(base) !== normalized(term) };
 }
 
-function resolveEntry<T extends SemanticMeasure | SemanticDimension>(
-  term: string,
+/** Strips a trailing "s" from each word ("median prices" -> "median price"). Not stemming. */
+function singularized(value: string): string {
+  return value.replace(/(\w)s\b/g, "$1");
+}
+
+function resolveEntryExact<T extends SemanticMeasure | SemanticDimension>(
+  target: string,
   entries: Record<string, T>,
 ): T | undefined {
-  const target = normalized(term);
   return Object.values(entries).find(
     (entry) =>
       normalized(entry.id) === target ||
       normalized(entry.label) === target ||
       entry.synonyms.some((synonym) => normalized(synonym) === target),
   );
+}
+
+/**
+ * Users pluralize governed terms ("median prices", "transactions counts");
+ * synonym lists stay singular (design decision, not an omission), so matching
+ * absorbs the plural here instead of every entry enumerating both forms. The
+ * fallback only runs when the exact pass fails, so registered synonyms that
+ * already happen to be plural (e.g. "transactions") keep resolving on the
+ * first pass, unaffected by this retry.
+ */
+function resolveEntry<T extends SemanticMeasure | SemanticDimension>(
+  term: string,
+  entries: Record<string, T>,
+): T | undefined {
+  const target = normalized(term);
+  return resolveEntryExact(target, entries) ?? resolveEntryExact(singularized(target), entries);
 }
 
 function resolveField(field: AnalysisField, model: SemanticModel): AnalysisField | undefined {
@@ -283,6 +306,23 @@ function resolveFilter(filter: AnalysisFilter, model: SemanticModel): FilterReso
   };
 }
 
+/** The "why not a raw average" sentence: the measure's own note when it has one, else a generic statement of the governed equivalent. */
+function governedEquivalentSentence(measure: SemanticMeasure): string {
+  return (
+    measure.aggregationNote ??
+    `The governed equivalent is “${measure.label}” (${measure.aggregation}).`
+  );
+}
+
+/** Every measure-clarification option carries the exact next call, like filter/series clarifications already do. */
+function measureClarificationOptions(model: SemanticModel) {
+  return Object.values(model.measures).map((measure) => ({
+    id: measure.id,
+    label: measure.label,
+    description: `${measure.description} Call inspectAnalysis again with measures ["${measure.id}"].`,
+  }));
+}
+
 const ANALYSIS_LABELS: Record<AnalysisType, string> = {
   single_value: "One headline value",
   trend: "Change over ordered time",
@@ -384,17 +424,12 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
         ambiguities: [
           {
             field: "measures",
-            question: `“${missingMeasure}” is not a governed measure here. ${
-              lossyMatch.aggregationNote ??
-              `The governed equivalent is “${lossyMatch.label}” (${lossyMatch.aggregation}).`
-            } Use “${lossyMatch.label}”${
+            question: `“${missingMeasure}” is not a governed measure here. ${governedEquivalentSentence(
+              lossyMatch,
+            )} Use “${lossyMatch.label}”${
               aggregationBase.hadChangeWord ? ' with comparison "vs_previous_period"' : ""
             } instead?`,
-            options: Object.values(model.measures).map((measure) => ({
-              id: measure.id,
-              label: measure.label,
-              description: measure.description,
-            })),
+            options: measureClarificationOptions(model),
             recommended: lossyMatch.id,
             reason: "Changing the aggregation changes the business meaning, so it needs confirmation.",
           },
@@ -408,13 +443,39 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
         {
           field: "measures",
           question: `Which governed measure should replace “${missingMeasure}”?`,
-          options: Object.values(model.measures).map((measure) => ({
-            id: measure.id,
-            label: measure.label,
-            description: measure.description,
-          })),
+          options: measureClarificationOptions(model),
           recommended: model.defaults.measure,
           reason: "Only measures defined by the semantic layer can be queried.",
+        },
+      ],
+    };
+  }
+
+  // The model can rewrite user wording into a governed synonym before this
+  // tool ever sees it — "average prices" arrives as measures: ["prices"],
+  // which resolves straight through (it's median_price's own synonym), so
+  // the lossy-aggregation check above never fires on an unresolved term. The
+  // recency guard further below uses this exact pattern: check draft.question
+  // deterministically, since prompt wording can't be trusted to self-report.
+  // Verbatim governed ids are the user-confirmed escape hatch — otherwise a
+  // clarification answered with the exact id would loop forever.
+  const measuresAreVerbatimIds = draft.measures.every((term) => term in model.measures);
+  const firstMeasure = measures[0]!;
+  if (
+    AVERAGE_WORDS.test(draft.question) &&
+    !measuresAreVerbatimIds &&
+    !/\b(avg|mean)\b/i.test(firstMeasure.aggregation)
+  ) {
+    return {
+      status: "needs_clarification",
+      resolved: { ...draft },
+      ambiguities: [
+        {
+          field: "measures",
+          question: `${governedEquivalentSentence(firstMeasure)} Use “${firstMeasure.label}” instead?`,
+          options: measureClarificationOptions(model),
+          recommended: firstMeasure.id,
+          reason: "Changing the aggregation changes the business meaning, so it needs confirmation.",
         },
       ],
     };
