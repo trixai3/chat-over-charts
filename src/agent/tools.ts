@@ -214,7 +214,9 @@ export const explainSemantics = tool({
 export const emitVerdict = tool({
   description:
     "Deliver the final answer as a one-line verdict tile. This is the ONLY way to conclude. " +
-    "Call it exactly once, last, after renderAnalysis.",
+    "Call it exactly once, last, after renderAnalysis. The headline and detail may state only " +
+    "facts present in renderAnalysis's summary (its displayed window, scope, and values) — never " +
+    "the requested-but-not-displayed range.",
   inputSchema: z.object({
     headline: z.string(),
     detail: z.string().optional(),

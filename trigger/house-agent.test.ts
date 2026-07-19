@@ -103,6 +103,13 @@ describe("governed analysis agent", () => {
       expect(chunks).toContain('"kind":"comparison"');
       expect(chunks).toContain("HM Land Registry Price Paid Data");
       expect(chunks).toContain("Lambeth leads");
+      // The model volunteered emitVerdict on its own at step 3 (well before
+      // the step-15 budget), so the final-step forcing in house-agent.ts's
+      // prepareStep must not have kicked in for this call.
+      expect(model.doStreamCalls[2]?.toolChoice).not.toEqual({
+        type: "tool",
+        toolName: "emitVerdict",
+      });
     } finally {
       await harness.close();
     }

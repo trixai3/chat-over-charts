@@ -13,6 +13,13 @@ import type {
   SourceAdapter,
 } from "./types";
 
+// Trigger.dev's chat stream rejects any single record over ~1 MiB (platform
+// cap; see node_modules/@trigger.dev/sdk/docs/ai-chat/patterns/large-payloads.mdx).
+// The tool output is emitted as one record, and JSON-stringifying the ViewSpec
+// plus the envelope Trigger.dev wraps it in adds overhead on top of the raw
+// spec bytes — 700k leaves honest headroom under the ~1048576-byte cap.
+const MAX_SPEC_BYTES = 700_000;
+
 // A comparison changes what the numbers *are* (percent deltas, not levels), so
 // display formatting and labels come from here, never from the raw measure.
 function displayFormat(measure: SemanticMeasure, plan: AnalysisPlan) {
@@ -483,35 +490,85 @@ export async function runAnalysis(
     };
   }
   const manifest = explanation(plan, model, query.sql, execution.stats);
+  const spec = buildSpec(final.kind, execution, plan, model, manifest);
+  const specBytes = Buffer.byteLength(JSON.stringify(spec), "utf8");
+  if (specBytes > MAX_SPEC_BYTES) {
+    return {
+      spec: notice(
+        "This figure is too large to stream",
+        `The rendered figure is ${specBytes.toLocaleString()} bytes, over the ${MAX_SPEC_BYTES.toLocaleString()}-byte streaming cap.`,
+        ["Use a coarser time grain", "Narrow the date window", "Show fewer series"],
+      ),
+      profile: datasetProfile,
+      query,
+    };
+  }
   return {
-    spec: buildSpec(final.kind, execution, plan, model, manifest),
+    spec,
     profile: datasetProfile,
     query,
   };
 }
 
+// The model never sees the rendered figure (toModelOutput compresses tool
+// results into this one line), so its verdict text can only be grounded in
+// facts stated here — the actual displayed window, not the requested one.
+function scopeSuffix(scope: string[]): string {
+  return scope.length > 0 ? ` scope: ${scope.join("; ")}.` : "";
+}
+
+function timeSeriesRange(series: Array<{ points: Array<{ t: string; v: number }> }>): {
+  values: number[];
+  times: string[];
+} {
+  const values = series.flatMap((s) => s.points.map((point) => point.v));
+  const times = series.flatMap((s) => s.points.map((point) => point.t)).sort();
+  return { values, times };
+}
+
 export function summarizeSpec(spec: ViewSpec): string {
   switch (spec.kind) {
     case "kpi":
-      return `${spec.label}: ${spec.value}.`;
+      return `${spec.label}: ${spec.value}.${scopeSuffix(spec.explanation.scope)}`;
     case "timeseries": {
-      const values = spec.series.flatMap((series) => series.points.map((point) => point.v));
-      return `${spec.series.length} series, ${values.length} points, range ${Math.min(...values)}–${Math.max(...values)}.`;
+      const { values, times } = timeSeriesRange(spec.series);
+      const first = times[0];
+      const last = times[times.length - 1];
+      return (
+        `${spec.series.length} series, ${values.length} points, displayed ${first} → ${last}, ` +
+        `range ${Math.min(...values)}–${Math.max(...values)}.${scopeSuffix(spec.explanation.scope)}`
+      );
     }
     case "comparison":
-      return `${spec.rows.length} categories. First: ${spec.rows[0].label} ${spec.rows[0].value}.`;
+      return `${spec.rows.length} categories. First: ${spec.rows[0].label} ${spec.rows[0].value}.${scopeSuffix(spec.explanation.scope)}`;
     case "table":
-      return `${spec.rows.length} rows and ${spec.columns.length} columns.`;
+      return `${spec.rows.length} rows and ${spec.columns.length} columns.${scopeSuffix(spec.explanation.scope)}`;
     case "notice":
       return `Cannot render yet: ${spec.message}`;
-    case "distribution":
-      return `${spec.bins.length} distribution bins.`;
-    case "pie":
-      return `${spec.slices.length} slices.`;
+    case "distribution": {
+      const medianText = spec.median !== undefined ? `, median ${spec.median}` : "";
+      return `${spec.bins.length} distribution bins${medianText}.${scopeSuffix(spec.explanation.scope)}`;
+    }
+    case "pie": {
+      const total = spec.slices.reduce((sum, slice) => sum + slice.value, 0);
+      const largest = spec.slices.reduce((max, slice) => (slice.value > max.value ? slice : max));
+      const share = total > 0 ? `${((largest.value / total) * 100).toFixed(1)}%` : "n/a";
+      return (
+        `${spec.slices.length} slices, largest ${largest.label} at ${share}.` +
+        `${scopeSuffix(spec.explanation.scope)}`
+      );
+    }
     case "scatter":
-      return `${spec.points.length} points.`;
-    case "area":
-      return `${spec.series.length} series.`;
+      return `${spec.points.length} points, x=${spec.xLabel}, y=${spec.yLabel}.${scopeSuffix(spec.explanation.scope)}`;
+    case "area": {
+      const { values, times } = timeSeriesRange(spec.series);
+      const first = times[0];
+      const last = times[times.length - 1];
+      return (
+        `${spec.series.length} series, ${values.length} points, displayed ${first} → ${last}.` +
+        `${scopeSuffix(spec.explanation.scope)}`
+      );
+    }
     case "disambiguation":
       return `${spec.candidates.length} candidates require a choice.`;
     case "verdict":

@@ -286,4 +286,68 @@ describe("semantic planning", () => {
 
     expect(plan.status).toBe("needs_clarification");
   });
+
+  it("recommends the fuzzy match for a typo'd measure, but still asks instead of auto-applying", () => {
+    const plan = planAnalysis({
+      question: "Show meidan price by district",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["meidan price"],
+      dimensions: [{ field: "district" }],
+      filters: [],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("needs_clarification");
+    if (plan.status !== "needs_clarification") return;
+    expect(plan.ambiguities[0].recommended).toBe("median_price");
+  });
+
+  it("recommends the fuzzy match for a typo'd measure synonym", () => {
+    const plan = planAnalysis({
+      question: "Show transactionz by district",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["transactionz"],
+      dimensions: [{ field: "district" }],
+      filters: [],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("needs_clarification");
+    if (plan.status !== "needs_clarification") return;
+    expect(plan.ambiguities[0].recommended).toBe("transaction_count");
+  });
+
+  it("suggests the nearest governed value for a typo'd filter value, but never auto-corrects it", () => {
+    const plan = planAnalysis({
+      question: "Show prices in Lambth",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["median price"],
+      dimensions: [{ field: "district" }],
+      filters: [{ field: "district", operator: "equals", value: "Lambth" }],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("unsupported");
+    if (plan.status !== "unsupported") return;
+    expect(plan.suggestions[0]).toContain("LAMBETH");
+  });
+
+  it("falls back to the model default when a nonsense term is too far from any governed measure", () => {
+    const plan = planAnalysis({
+      question: "Show widgets by district",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["widgets"],
+      dimensions: [{ field: "district" }],
+      filters: [],
+      orderBy: [],
+    });
+
+    expect(plan.status).toBe("needs_clarification");
+    if (plan.status !== "needs_clarification") return;
+    expect(plan.ambiguities[0].recommended).toBe("median_price");
+  });
 });

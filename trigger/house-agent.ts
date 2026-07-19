@@ -1,5 +1,5 @@
 import { chat } from "@trigger.dev/sdk/ai";
-import { streamText, stepCountIs, type LanguageModel } from "ai";
+import { streamText, stepCountIs, type LanguageModel, type PrepareStepFunction } from "ai";
 import { z } from "zod";
 import { getModel } from "../src/shared/model";
 import { analysisTools } from "../src/agent/tools";
@@ -29,6 +29,12 @@ type ClientData = { model?: LanguageModel };
 // history re-conversion from turn 2 onward (AGENTS.md invariant 3).
 const tools = analysisTools;
 
+// stepCountIs(n) stops the loop once `steps.length === n` — checked *after*
+// each step is appended (ai@6 streamText loop, node_modules/ai/dist/index.js
+// ~L4660-5003: prepareStep's `stepNumber` is `steps.length` *before* the step
+// runs, so the last step the loop will ever run has stepNumber === n - 1).
+const STEP_BUDGET = 15;
+
 const SYSTEM_PROMPT = [
   "You turn analytical questions into governed figures.",
   "You never write prose. The user sees tiles, not chat text.",
@@ -37,6 +43,7 @@ const SYSTEM_PROMPT = [
   "If it reports NEEDS_CLARIFICATION, call requestClarification relaying its options verbatim.",
   "Never invent clarification questions of your own. When a clarification option's description tells you the exact next call, make that call directly.",
   "If it reports READY, call renderAnalysis using the exact resolved semantic IDs.",
+  "The verdict must describe what the figure actually displays, as reported by renderAnalysis (its displayed window and scope), not what was requested.",
   "If renderAnalysis reports it cannot render (the result starts 'Cannot render yet'), do not retry it; conclude immediately with emitVerdict (tone bad) whose detail relays the notice's suggestion.",
   "When the user names a chart style, pass it as preferredFigure; the READY summary lists the figure plus compatible alternatives — only switch figures by re-calling renderAnalysis with a preferredFigure from that list.",
   "Map phrasing to figures: 'share of'/'proportion'/'breakdown' suggests pie, 'correlation'/'X vs Y' suggests scatter, 'spread'/'distribution' of values means analysisType distribution, 'over time' means trend; when nothing is implied, omit preferredFigure.",
@@ -50,17 +57,58 @@ export const houseAgent = chat
   .agent({
     id: "house-agent",
     tools,
-    run: async ({ messages, tools, clientData, signal }) =>
-      streamText({
-        // Spread first so our explicit fields below win — this also wires up
-        // compaction/steering via prepareStep (backend.mdx warning).
-        ...chat.toStreamTextOptions({ tools }),
+    run: async ({ messages, tools, clientData, signal }) => {
+      // Spread first so our explicit fields below win — this also wires up
+      // compaction/steering via prepareStep (backend.mdx warning).
+      const base = chat.toStreamTextOptions({ tools });
+      // toStreamTextOptions returns Record<string, unknown> by design (stays
+      // version-agnostic across streamText's TOOLS inference); narrow just
+      // enough to call it from our own prepareStep below.
+      const basePrepareStep = base.prepareStep as PrepareStepFunction<typeof tools> | undefined;
+
+      // Typed explicitly (rather than inline in the streamText call) so
+      // `options` resolves against our concrete tool set instead of widening
+      // to the generic ToolSet default — streamText's own TOOLS inference is
+      // ambiguous here because `base` (spread below) is an untyped Record.
+      const prepareStep: PrepareStepFunction<typeof tools> = async (options) => {
+        const fromBase = await basePrepareStep?.(options);
+        const isFinalStep = options.stepNumber === STEP_BUDGET - 1;
+        const verdictAlreadyCalled = options.steps.some((step) =>
+          step.toolCalls.some((call) => call.toolName === "emitVerdict"),
+        );
+        if (!isFinalStep || verdictAlreadyCalled) return fromBase;
+        return {
+          ...fromBase,
+          toolChoice: { type: "tool", toolName: "emitVerdict" },
+          activeTools: ["emitVerdict"],
+        };
+      };
+
+      return streamText({
+        ...base,
+        // Repeated explicitly (base already carries it, untyped) so
+        // streamText's TOOLS generic anchors on our concrete tool set rather
+        // than defaulting — that default is what made the `prepareStep`
+        // below fail to type-check against it.
+        tools,
         // The injection seam: tests pass a mock; prod falls back to the env
         // switch in getModel().
         model: clientData?.model ?? getModel(),
         system: SYSTEM_PROMPT,
         messages,
         abortSignal: signal,
-        stopWhen: stepCountIs(15),
-      }),
+        stopWhen: stepCountIs(STEP_BUDGET),
+        // The no-prose invariant (AGENTS.md #1) is only as strong as its
+        // termination guarantee: "finish every turn with emitVerdict" is a
+        // system-prompt instruction, not a hard stop — the model can burn the
+        // whole step budget without ever calling it. On the final allowed
+        // step, mechanically force the call via toolChoice/activeTools so a
+        // run can never end verdict-less. `base.prepareStep` must still run
+        // every step (not just get overridden away) — it's what drives
+        // compaction, mid-turn steering, and background injection; assigning
+        // our own `prepareStep` after the spread without calling theirs would
+        // silently disable all three (backend.mdx, compaction.mdx).
+        prepareStep,
+      });
+    },
   });

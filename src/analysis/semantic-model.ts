@@ -61,6 +61,13 @@ function singularized(value: string): string {
   return value.replace(/(\w)s\b/g, "$1");
 }
 
+/**
+ * Tried in order; the first transform whose result matches exactly wins. Only
+ * pure rewrites belong here — anything with semantic side effects (change
+ * words implying a comparison) stays in planAnalysis.
+ */
+const TERM_TRANSFORMS: Array<(term: string) => string> = [(term) => term, singularized];
+
 function resolveEntryExact<T extends SemanticMeasure | SemanticDimension>(
   target: string,
   entries: Record<string, T>,
@@ -74,19 +81,76 @@ function resolveEntryExact<T extends SemanticMeasure | SemanticDimension>(
 }
 
 /**
- * Users pluralize governed terms ("median prices", "transactions counts");
- * synonym lists stay singular (design decision, not an omission), so matching
- * absorbs the plural here instead of every entry enumerating both forms. The
- * fallback only runs when the exact pass fails, so registered synonyms that
- * already happen to be plural (e.g. "transactions") keep resolving on the
- * first pass, unaffected by this retry.
+ * Two-tier matching, tier one: exact, after a declared transform. Users
+ * pluralize governed terms ("median prices", "transactions counts");
+ * synonym lists stay singular (design decision, not an omission), so
+ * TERM_TRANSFORMS absorbs the plural here instead of every entry
+ * enumerating both forms. Transforms run in order and stop at the first
+ * exact hit, so registered synonyms that already happen to be plural (e.g.
+ * "transactions") keep resolving on the identity pass, unaffected by the
+ * singularized retry.
  */
 function resolveEntry<T extends SemanticMeasure | SemanticDimension>(
   term: string,
   entries: Record<string, T>,
 ): T | undefined {
   const target = normalized(term);
-  return resolveEntryExact(target, entries) ?? resolveEntryExact(singularized(target), entries);
+  for (const transform of TERM_TRANSFORMS) {
+    const hit = resolveEntryExact(transform(target), entries);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** Anything within this many edits still counts as "probably meant that",
+ *  but only for ranking a clarification's `recommended` option — see
+ *  suggestEntry/suggestValues below. Two-tier policy tier two: fuzzy never
+ *  auto-applies. */
+const FUZZY_MAX_DISTANCE = 2;
+
+/**
+ * Plain DP Levenshtein distance. Governed terms are short (a handful of
+ * words), so this is called at clarification time only, never per-row —
+ * cheap enough without a library. Capped early once a row's minimum exceeds
+ * maxDistance, since callers only care whether the result is <= threshold.
+ */
+function levenshteinDistance(a: string, b: string, maxDistance: number): number {
+  if (Math.abs(a.length - b.length) > maxDistance) return maxDistance + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      rowMin = Math.min(rowMin, curr[j]);
+    }
+    if (rowMin > maxDistance) return maxDistance + 1;
+    prev = curr;
+  }
+  return prev[b.length];
+}
+
+/**
+ * Best governed entry within edit distance 2 of the term, for ranking
+ * clarification recommendations ONLY — fuzzy matches never auto-apply.
+ */
+function suggestEntry<T extends SemanticMeasure | SemanticDimension>(
+  term: string,
+  entries: Record<string, T>,
+): T | undefined {
+  const target = normalized(term);
+  let best: { entry: T; distance: number } | undefined;
+  for (const entry of Object.values(entries)) {
+    const names = [entry.id, entry.label, ...entry.synonyms];
+    for (const name of names) {
+      const distance = levenshteinDistance(target, normalized(name), FUZZY_MAX_DISTANCE);
+      if (distance <= FUZZY_MAX_DISTANCE && (!best || distance < best.distance)) {
+        best = { entry, distance };
+      }
+    }
+  }
+  return best?.entry;
 }
 
 function resolveField(field: AnalysisField, model: SemanticModel): AnalysisField | undefined {
@@ -100,6 +164,21 @@ function normalizedFilterValue(value: string, dimension: SemanticDimension): str
   if (dimension.valueNormalization === "uppercase") return value.toUpperCase();
   if (dimension.valueNormalization === "lowercase") return value.toLowerCase();
   return value;
+}
+
+/**
+ * Governed values of `dimension` within edit distance 2 of `term`, closest
+ * first — phrasing for a "Did you mean" suggestion only. The filter still
+ * returns unsupported either way: value typos ask, they never guess.
+ */
+function suggestValues(term: string, dimension: SemanticDimension): string[] {
+  if (!dimension.values) return [];
+  const target = normalizedFilterValue(term, dimension);
+  return dimension.values
+    .map((value) => ({ value, distance: levenshteinDistance(target, value, FUZZY_MAX_DISTANCE) }))
+    .filter((candidate) => candidate.distance <= FUZZY_MAX_DISTANCE)
+    .sort((a, b) => a.distance - b.distance)
+    .map((candidate) => candidate.value);
 }
 
 type ValueCandidate = { dimension: SemanticDimension; value: string; exact: boolean };
@@ -444,7 +523,7 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
           field: "measures",
           question: `Which governed measure should replace “${missingMeasure}”?`,
           options: measureClarificationOptions(model),
-          recommended: model.defaults.measure,
+          recommended: suggestEntry(missingMeasure, model.measures)?.id ?? model.defaults.measure,
           reason: "Only measures defined by the semantic layer can be queried.",
         },
       ],
@@ -521,7 +600,10 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
             label: dimension.label,
             description: dimension.description,
           })),
-          recommended: model.defaults.timeDimension ?? Object.keys(model.dimensions)[0],
+          recommended:
+            suggestEntry(missingDimension.field, model.dimensions)?.id ??
+            model.defaults.timeDimension ??
+            Object.keys(model.dimensions)[0],
           reason: "Only dimensions and grains supported by the source can be selected.",
         },
       ],
@@ -606,7 +688,9 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
             id: dimension.id,
             label: dimension.label,
           })),
-          recommended: Object.keys(model.dimensions)[0],
+          recommended:
+            suggestEntry(missingFilter.field, model.dimensions)?.id ??
+            Object.keys(model.dimensions)[0],
           reason: "Filters must resolve to governed dimensions before SQL is compiled.",
         },
       ],
@@ -634,10 +718,12 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
       };
     }
     if (resolution.status === "unknown_value") {
+      const nearestValues = suggestValues(resolution.term, resolution.dimension);
       return {
         status: "unsupported",
         reason: `No governed ${resolution.dimension.label} value matches “${resolution.term}”.`,
         suggestions: [
+          ...(nearestValues.length > 0 ? [`Did you mean "${nearestValues[0]}"?`] : []),
           "Check the spelling, or ask what values exist for this dimension.",
         ],
       };

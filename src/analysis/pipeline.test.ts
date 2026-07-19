@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planAnalysis } from "./semantic-model";
-import { runAnalysis } from "./pipeline";
+import { runAnalysis, summarizeSpec } from "./pipeline";
 import type { SourceAdapter } from "./types";
 
 const stats = { rowsRead: 4030464, bytesRead: 120000000, elapsedMs: 45, queryId: "uk-test" };
@@ -195,5 +195,65 @@ describe("governed figure pipeline with UK house-price data", () => {
       { from: 600000, to: 1000000, count: 121 },
     ]);
     expect(result.spec.median).toBe(526890);
+  });
+
+  it("summarizeSpec states the actual displayed window and scope, not just shape counts", async () => {
+    const plan = planAnalysis({
+      question: "Compare Lambeth and Havering prices by year",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["median price"],
+      dimensions: [{ field: "year", grain: "year" }, { field: "borough" }],
+      filters: [
+        { field: "county", operator: "equals", value: "Greater London" },
+        { field: "borough", operator: "in", value: ["Lambeth", "Havering"] },
+      ],
+      orderBy: [{ field: "sale_date", direction: "asc" }],
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    const adapter: SourceAdapter = {
+      execute: async () => ({
+        rows: [
+          { sale_date: "2024-01-01", district: "HAVERING", median_price: 440000 },
+          { sale_date: "2025-01-01", district: "HAVERING", median_price: 445500 },
+          { sale_date: "2024-01-01", district: "LAMBETH", median_price: 535000 },
+          { sale_date: "2025-01-01", district: "LAMBETH", median_price: 526890 },
+        ],
+        stats,
+      }),
+    };
+    const result = await runAnalysis(plan, adapter);
+    const summary = summarizeSpec(result.spec);
+    // The model never sees the rendered figure, so the summary — its only
+    // window into what was actually plotted — must state the real first and
+    // last displayed dates (never just point/series counts), plus the scope
+    // strings that describe applied filters/grain in human words.
+    expect(summary).toContain("displayed 2024-01-01 → 2025-01-01");
+    expect(summary).toContain("scope:");
+  });
+
+  it("returns a too-large notice instead of streaming a spec over the byte cap", async () => {
+    // Trigger.dev's chat stream rejects any single record over ~1 MiB; a
+    // multi-thousand-point daily trend can cross that on its own.
+    const plan = planAnalysis({
+      question: "Show the daily median price trend since 2015",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["median price"],
+      dimensions: [{ field: "sale_date", grain: "day" }],
+      filters: [{ field: "county", operator: "equals", value: "Greater London" }],
+      orderBy: [{ field: "sale_date", direction: "asc" }],
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    const rows = Array.from({ length: 30000 }, (_, index) => ({
+      sale_date: new Date(Date.UTC(2015, 0, 1) + index * 86400000).toISOString().slice(0, 10),
+      median_price: 400000 + (index % 50000),
+    }));
+    const adapter: SourceAdapter = { execute: async () => ({ rows, stats }) };
+    const result = await runAnalysis(plan, adapter);
+    expect(result.spec).toMatchObject({
+      kind: "notice",
+      title: "This figure is too large to stream",
+    });
   });
 });
