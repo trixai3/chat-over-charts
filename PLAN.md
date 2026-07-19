@@ -800,3 +800,23 @@ For the app itself — separate from the Claude Code subscription.
 | **Query-time fan-out** | **Dropped** (17 Jul) | ClickHouse answers in ~50ms — parallelism saves nothing |
 | Offline batch fan-out | **Kept** | 7,726 slow LLM calls — genuinely parallel and expensive |
 | Agent skills | Project-level install | Hackathon-specific; avoid polluting global tx-skills |
+| **Scope direction** | **Deepen within one dataset, don't go cross-domain generic** (19 Jul) | After the first live run, one tool felt too limited. Root cause was "only 1 tool," not "it's about houses." The architecture (ViewSpec, tile renderer, chat.agent, constrained-tool pattern) is **already domain-agnostic** — only the tools are housing-specific. Add chart-kind tools (timeseries, distribution, extend compare); make generality a **pitch property** ("this pattern works for any dataset, here it's UK housing"), not a build target. A generic LLM-writes-SQL engine was rejected: it breaks invariant 5 (hallucination), loses the ClickHouse-depth story, and can't ship in 4 solo days. |
+
+### 12.1 Open questions — decide before building the chart-kind tools (19 Jul)
+
+Raised in a re-planning discussion; **not yet resolved**. Trish paused here.
+
+1. **Breadth vs demo focus.** More tools = more user questions that hit an uncovered
+   combination. Optimise for "answers many shapes" or "one rehearsed demo path + a few solid
+   shapes"? Different bets for a hackathon.
+2. **Place/level resolution ordering.** "Wigan" is a *district*, not a county — timeseries/
+   distribution over "any place" need to know its level and parent. That's what the
+   disambiguation-HITL slice solves. **Open: resolve places first, then add chart kinds? Or add
+   chart kinds first and keep hitting the Wigan-style boundary?** *(Tentative lean: resolution
+   first — even a pure-SQL version — so every later tool naturally eats "any place".)*
+3. **"Lowest price" semantics.** The whole design is medians (a single cheapest sale is noise).
+   Do we honour a literal `min`, or reframe to median-over-time? A product-values call: "true
+   trend" vs "answer anything, even a misleading number".
+4. **Demo climax.** Adding chart kinds widens capability but doesn't itself create a wow moment.
+   What's the peak beat after deepening — a continuous compare → drill → timeline → distribution
+   walk in one conversation, or something else?
