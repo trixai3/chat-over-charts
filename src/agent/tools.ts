@@ -21,7 +21,10 @@ export const analysisDraftSchema = z.object({
   measures: z
     .array(z.string())
     .default([])
-    .describe("Governed measure IDs, labels, or synonyms. Never SQL expressions."),
+    .describe(
+      "The user's own measure wording (or governed IDs once resolved). " +
+        "Never SQL expressions, and never substitute a different aggregation than the user asked for.",
+    ),
   dimensions: z
     .array(
       z.object({
@@ -33,7 +36,12 @@ export const analysisDraftSchema = z.object({
   filters: z
     .array(
       z.object({
-        field: z.string(),
+        field: z
+          .string()
+          .describe(
+            "Best-guess field. For place names any guess is fine — values are resolved " +
+              "against governed reference data, so never ask the user which field a place is.",
+          ),
         operator: z.enum(["equals", "in", "between", "gte", "lte"]),
         value: filterValue,
       }),
@@ -44,6 +52,23 @@ export const analysisDraftSchema = z.object({
     .default([]),
   preferredFigure: z.enum(["kpi", "timeseries", "comparison", "table"]).optional(),
   limit: z.number().int().min(1).max(1000).optional(),
+  seriesSelection: z
+    .object({
+      method: z.literal("top"),
+      n: z.number().int().min(1).max(8),
+      by: z.string().optional().describe("Governed measure term used to rank the series."),
+    })
+    .optional()
+    .describe(
+      "Only after the user confirms a series scope via requestClarification. Never invent it.",
+    ),
+  comparison: z
+    .enum(["vs_previous_period"])
+    .optional()
+    .describe(
+      "For change/growth questions: display each measure as its % change versus the previous period. " +
+        "Requires a time dimension (trend).",
+    ),
 });
 
 function planSummary(plan: AnalysisPlanResult): string {
@@ -54,6 +79,8 @@ function planSummary(plan: AnalysisPlanResult): string {
       `measures=${plan.request.measures.join(",")}`,
       `dimensions=${plan.request.dimensions.map((item) => `${item.field}${item.grain ? `:${item.grain}` : ""}`).join(",") || "none"}`,
       `filters=${plan.request.filters.map((item) => `${item.field}:${item.operator}:${Array.isArray(item.value) ? item.value.join("|") : item.value}`).join(",") || "none"}`,
+      `series=${plan.request.seriesSelection ? `top ${plan.request.seriesSelection.n} by ${plan.request.seriesSelection.by}` : "all"}`,
+      `comparison=${plan.request.comparison ?? "none"}`,
       `figure=${plan.figure}`,
       `reason=${plan.figureReason}`,
       "Call renderAnalysis with these resolved semantic IDs.",

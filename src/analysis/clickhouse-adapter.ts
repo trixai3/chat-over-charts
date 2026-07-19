@@ -99,9 +99,27 @@ export function compileClickHouseQuery(
     if (!expression) throw new Error(`${dimension.label} does not support grain ${field.grain}.`);
     return `${expression} AS ${field.field}`;
   });
+  const timeAlias = request.dimensions.find(
+    (field) => model.dimensions[field.field]?.kind === "time",
+  )?.field;
+  const categoryAliases = request.dimensions
+    .filter((field) => model.dimensions[field.field]?.kind === "category")
+    .map((field) => field.field);
+
+  // `comparison: "vs_previous_period"` turns every requested aggregate into
+  // its % change with a window function, so the generated SQL stays complete
+  // and inspectable — measures themselves remain plain aggregates.
+  const usesTrendWindow = request.comparison === "vs_previous_period";
+  if (usesTrendWindow && !timeAlias) {
+    throw new Error("A previous-period comparison requires a time dimension in the semantic query.");
+  }
   const measures = request.measures.map((id) => {
     const measure = model.measures[id];
     if (!measure) throw new Error(`Unknown governed measure: ${id}`);
+    if (usesTrendWindow) {
+      const previous = `lagInFrame(${measure.expression}, 1) OVER trend_window`;
+      return `round(100 * (${measure.expression} - ${previous}) / nullIf(${previous}, 0), 1) AS ${id}`;
+    }
     return `${measure.expression} AS ${id}`;
   });
 
@@ -110,6 +128,23 @@ export function compileClickHouseQuery(
     if (!dimension) throw new Error(`Unknown governed filter dimension: ${filter.field}`);
     return compileFilter(filter, dimension, index, params);
   });
+
+  // A confirmed top-N series selection (design §13) scopes the series
+  // dimension with a subquery over the same filtered population. It reuses the
+  // same named parameters, so values still never enter the SQL text.
+  if (request.seriesSelection) {
+    const seriesDimension = request.dimensions
+      .map((field) => model.dimensions[field.field])
+      .find((dimension) => dimension?.kind === "category");
+    const rank = model.measures[request.seriesSelection.by];
+    if (seriesDimension && rank) {
+      const scopeWhere = filters.length > 0 ? `\n  WHERE ${filters.join("\n    AND ")}` : "";
+      const topN = Math.max(1, Math.floor(request.seriesSelection.n));
+      filters.push(
+        `${seriesDimension.expression} IN (\n  SELECT ${seriesDimension.expression}\n  FROM {database:Identifier}.{table:Identifier}${scopeWhere}\n  GROUP BY ${seriesDimension.expression}\n  ORDER BY ${rank.expression} DESC\n  LIMIT ${topN}\n)`,
+      );
+    }
+  }
 
   const selectedAliases = new Set([...dimensionAliases, ...measureAliases]);
   const requestedOrder = request.orderBy.map((order) => {
@@ -125,6 +160,12 @@ export function compileClickHouseQuery(
         ? [`${measureAliases[measureAliases.length - 1]} DESC`]
         : [];
 
+  const trendWindow = usesTrendWindow
+    ? `WINDOW trend_window AS (${
+        categoryAliases.length > 0 ? `PARTITION BY ${categoryAliases.join(", ")} ` : ""
+      }ORDER BY ${timeAlias} ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`
+    : "";
+
   const limit = resultLimit(request);
   const sql = [
     `SELECT\n  ${[...dimensions, ...measures].join(",\n  ")}`,
@@ -133,6 +174,7 @@ export function compileClickHouseQuery(
     dimensions.length > 0 && measures.length > 0
       ? `GROUP BY ${dimensionAliases.join(", ")}`
       : "",
+    trendWindow,
     requestedOrder.length > 0 || defaultOrder.length > 0
       ? `ORDER BY ${(requestedOrder.length > 0 ? requestedOrder : defaultOrder).join(", ")}`
       : "",

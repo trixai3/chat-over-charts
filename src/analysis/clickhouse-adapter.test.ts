@@ -5,13 +5,13 @@ import { getSemanticModel, planAnalysis } from "./semantic-model";
 
 function londonComparisonPlan() {
   const plan = planAnalysis({
-    question: "Which London borough rose fastest?",
+    question: "Compare London boroughs by median price",
     sourceId: "uk-house-prices",
     analysisType: "category_comparison",
-    measures: ["latest median price", "five year growth"],
+    measures: ["median price", "transactions"],
     dimensions: [{ field: "borough" }],
     filters: [{ field: "county", operator: "equals", value: "Greater London" }],
-    orderBy: [{ field: "five year growth", direction: "desc" }],
+    orderBy: [{ field: "median price", direction: "desc" }],
   });
   if (plan.status !== "ready") throw new Error("Expected a ready plan");
   return plan;
@@ -23,10 +23,10 @@ describe("ClickHouse semantic compiler", () => {
     const model = getSemanticModel(plan.request.sourceId)!;
     const query = compileClickHouseQuery(plan.request, model);
 
-    expect(query.sql).toContain("quantileTDigestIf");
+    expect(query.sql).toContain("quantileTDigest");
     expect(query.sql).toContain("FROM {database:Identifier}.{table:Identifier}");
     expect(query.sql).toContain("county = {filter_0:String}");
-    expect(query.sql).toContain("ORDER BY five_year_price_change_pct DESC");
+    expect(query.sql).toContain("ORDER BY median_price DESC");
     expect(query.sql).toContain("LIMIT 41");
     expect(query.sql).not.toContain("Greater London");
     expect(query.params.filter_0).toBe("GREATER LONDON");

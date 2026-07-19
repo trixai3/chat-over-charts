@@ -200,6 +200,14 @@ An opt-in live test exists at `src/analysis/live-uk-house-prices.test.ts`. It sk
 | D10 | Rename the agent around the generalized domain | Kept task ID `house-agent` | Avoids unnecessary session/transport migration during the redesign. Its tools, prompt, and processing path are generic. |
 | D11 | Live ClickHouse integration verification | Live test added but external access unavailable in the managed environment | The test remains runnable with credentials outside the sandbox. UK real-shaped fixtures and mocked query responses cover the implementation here. |
 
+### Undeclared drifts found and fixed on 19 July 2026
+
+Four drifts were **not** recorded above and caused a real failure ("average price change per
+district in london over time" rendered a single meaningless line). They are diagnosed and fixed in
+[FIGURE_GENERATOR_FIXES.md](FIGURE_GENERATOR_FIXES.md): measure temporal scope (design §10.3/§15.2),
+greedy change synonyms (§9.1), silent measure/aggregation defaults (§2, §5.2), and missing
+pre-query series-scope clarification (§5.4, §9.1, §11).
+
 ## 8. Remaining placeholders, not part of this redesign
 
 - Drill-down and `onAction`.

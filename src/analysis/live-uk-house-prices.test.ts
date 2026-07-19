@@ -12,13 +12,13 @@ const hasCredentials = Boolean(
 describe.skipIf(!hasCredentials)("live UK House Price Paid integration", () => {
   it("compiles, executes, validates, and renders a London borough comparison", async () => {
     const plan = planAnalysis({
-      question: "Compare London boroughs by latest median price and five-year change",
+      question: "Compare London boroughs by median price",
       sourceId: "uk-house-prices",
       analysisType: "category_comparison",
-      measures: ["latest median price", "five year growth"],
+      measures: ["median price", "transactions"],
       dimensions: [{ field: "borough" }],
       filters: [{ field: "county", operator: "equals", value: "Greater London" }],
-      orderBy: [{ field: "five year growth", direction: "desc" }],
+      orderBy: [{ field: "median price", direction: "desc" }],
     });
     if (plan.status !== "ready") throw new Error(`Plan was not ready: ${plan.status}`);
 
@@ -29,5 +29,34 @@ describe.skipIf(!hasCredentials)("live UK House Price Paid integration", () => {
     expect(result.spec.rows.some((row) => row.label === "HAVERING")).toBe(true);
     expect(result.spec.stats.rowsRead).toBeGreaterThan(0);
     expect(result.spec.explanation.provenance.queryId).toBeTruthy();
+  }, 30_000);
+
+  // The 19 July failure case: this question used to compile a fixed-window
+  // snapshot grouped by year (a single line of zeros). It must now produce a
+  // top-N multi-series per-period change over the confirmed scope.
+  it("renders per-district price change over time with a confirmed top-N scope", async () => {
+    const plan = planAnalysis({
+      question: "show me average price change per district in london over time",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["price change"],
+      dimensions: [{ field: "sale_date", grain: "year" }, { field: "district" }],
+      filters: [{ field: "county", operator: "equals", value: "Greater London" }],
+      orderBy: [],
+      seriesSelection: { method: "top", n: 8 },
+    });
+    if (plan.status !== "ready") throw new Error(`Plan was not ready: ${plan.status}`);
+
+    const result = await runAnalysis(plan);
+    expect(result.spec.kind).toBe("timeseries");
+    if (result.spec.kind !== "timeseries") return;
+    expect(result.spec.series.length).toBeGreaterThan(1);
+    expect(result.spec.series.length).toBeLessThanOrEqual(8);
+    for (const series of result.spec.series) {
+      // Every remaining point is a real year-over-year percentage, not the
+      // all-zero artefact of the old window-measure SQL.
+      expect(series.points.length).toBeGreaterThan(10);
+      expect(series.points.some((point) => point.v !== 0)).toBe(true);
+    }
   }, 30_000);
 });

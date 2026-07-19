@@ -8,9 +8,24 @@ import type {
   DatasetProfile,
   FigureKind,
   QueryExecution,
+  SemanticMeasure,
   SemanticModel,
   SourceAdapter,
 } from "./types";
+
+// A comparison changes what the numbers *are* (percent deltas, not levels), so
+// display formatting and labels come from here, never from the raw measure.
+function displayFormat(measure: SemanticMeasure, plan: AnalysisPlan) {
+  return plan.request.comparison
+    ? ({ style: "percent", maximumFractionDigits: 1 } as const)
+    : measure.format;
+}
+
+function displayLabel(measure: SemanticMeasure, plan: AnalysisPlan): string {
+  return plan.request.comparison
+    ? `${measure.label} — % change vs previous period`
+    : measure.label;
+}
 
 function numberValue(value: unknown, field: string): number {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -28,6 +43,7 @@ function profile(
   plan: AnalysisPlan,
   model: SemanticModel,
   resultLimit: number,
+  rawRowCount: number,
 ): DatasetProfile {
   const category = plan.request.dimensions.find(
     (field) => model.dimensions[field.field]?.kind === "category",
@@ -47,7 +63,7 @@ function profile(
     truncated:
       plan.request.analysisType !== "single_value" &&
       plan.request.limit === undefined &&
-      execution.rows.length >= resultLimit,
+      rawRowCount >= resultLimit,
   };
 }
 
@@ -98,14 +114,24 @@ function explanation(
     if (field.grain) scope.push(`${model.dimensions[field.field].label} displayed by ${field.grain}`);
   }
   if (plan.request.limit) scope.push(`Explicit result limit: ${plan.request.limit}`);
+  if (plan.request.seriesSelection) {
+    const rank = model.measures[plan.request.seriesSelection.by];
+    scope.push(
+      `Confirmed series scope: top ${plan.request.seriesSelection.n} by ${rank?.label ?? plan.request.seriesSelection.by}`,
+    );
+  }
 
   return {
-    whatShown: `${measures.map((measure) => measure.label).join(" and ")}${
+    whatShown: `${measures.map((measure) => displayLabel(measure, plan)).join(" and ")}${
       dimensions.length > 0 ? ` by ${dimensions.map((dimension) => dimension.label).join(" and ")}` : ""
     }.`,
-    calculation: measures
-      .map((measure) => `${measure.label}: ${measure.description} (${measure.aggregation}).`)
-      .join(" "),
+    calculation:
+      measures
+        .map((measure) => `${measure.label}: ${measure.description} (${measure.aggregation}).`)
+        .join(" ") +
+      (plan.request.comparison
+        ? " Each value is displayed as the percentage change versus the previous displayed period."
+        : ""),
     scope,
     provenance: {
       semanticModel: model.label,
@@ -116,7 +142,14 @@ function explanation(
       figurePolicyVersion: model.figurePolicyVersion,
       queryId: stats.queryId,
     },
-    limitations: [...new Set(measures.flatMap((measure) => measure.limitations))],
+    limitations: [
+      ...new Set([
+        ...measures.flatMap((measure) => measure.limitations),
+        ...(plan.request.comparison
+          ? ["The first displayed period is omitted because it has no previous period to compare against."]
+          : []),
+      ]),
+    ],
     inspect: {
       semanticQuery: JSON.stringify(plan.request, null, 2),
       generatedSql: querySql,
@@ -125,7 +158,7 @@ function explanation(
 }
 
 function title(plan: AnalysisPlan, model: SemanticModel): string {
-  const measure = model.measures[plan.request.measures[0]].label;
+  const measure = displayLabel(model.measures[plan.request.measures[0]], plan);
   const dimensions = plan.request.dimensions
     .map((field) => model.dimensions[field.field].label)
     .join(" by ");
@@ -149,8 +182,8 @@ function buildKpi(
     kind: "kpi",
     title: title(plan, model),
     value,
-    format: measure.format,
-    label: measure.label,
+    format: displayFormat(measure, plan),
+    label: displayLabel(measure, plan),
     stats,
     explanation: manifest,
   };
@@ -173,7 +206,7 @@ function buildTimeseries(
   const measure = model.measures[plan.request.measures[0]];
   const grouped = new Map<string, Array<{ t: string; v: number }>>();
   for (const row of rows) {
-    const label = category ? stringValue(row[category.field]) : measure.label;
+    const label = category ? stringValue(row[category.field]) : displayLabel(measure, plan);
     const points = grouped.get(label) ?? [];
     points.push({ t: stringValue(row[time.field]), v: numberValue(row[measure.id], measure.id) });
     grouped.set(label, points);
@@ -181,7 +214,7 @@ function buildTimeseries(
   return {
     kind: "timeseries",
     title: title(plan, model),
-    format: measure.format,
+    format: displayFormat(measure, plan),
     series: [...grouped.entries()].map(([label, points]) => ({ label, points })),
     drillTargets: [],
     stats,
@@ -207,9 +240,9 @@ function buildComparison(
   return {
     kind: "comparison",
     title: title(plan, model),
-    metricLabel: measure.label,
-    comparisonLabel: deltaMeasure?.label,
-    format: measure.format,
+    metricLabel: displayLabel(measure, plan),
+    comparisonLabel: deltaMeasure ? displayLabel(deltaMeasure, plan) : undefined,
+    format: displayFormat(measure, plan),
     rows: rows.map((row) => ({
       label: stringValue(row[category.field]),
       value: numberValue(row[measure.id], measure.id),
@@ -233,8 +266,8 @@ function buildTable(
   }));
   const measureColumns = plan.request.measures.map((id) => ({
     key: id,
-    label: model.measures[id].label,
-    format: model.measures[id].format,
+    label: displayLabel(model.measures[id], plan),
+    format: displayFormat(model.measures[id], plan),
   }));
   return {
     kind: "table",
@@ -279,8 +312,19 @@ export async function runAnalysis(
   if (!model) throw new Error(`Unknown semantic model: ${plan.request.sourceId}`);
   const query = compileClickHouseQuery(plan.request, model);
   const source = adapter ?? new ClickHouseAdapter();
-  const execution = await source.execute(query);
-  const datasetProfile = profile(execution, plan, model, query.resultLimit);
+  const raw = await source.execute(query);
+  // Under a previous-period comparison the first period has no predecessor, so
+  // the window function yields NULL there. Dropping it is a declared behaviour
+  // — the explanation's limitations state the omission.
+  const execution: QueryExecution = plan.request.comparison
+    ? {
+        ...raw,
+        rows: raw.rows.filter((row) =>
+          plan.request.measures.every((id) => row[id] !== null && row[id] !== undefined),
+        ),
+      }
+    : raw;
+  const datasetProfile = profile(execution, plan, model, query.resultLimit, raw.rows.length);
   const validationIssues = validateExecution(execution, plan);
   if (validationIssues.length > 0) {
     return {

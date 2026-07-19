@@ -113,13 +113,13 @@ export const tableFixture: ViewSpec = {
   title: "London borough comparison",
   columns: [
     { key: "district", label: "District" },
-    { key: "latest_median_price", label: "Latest median", format: { style: "currency", currency: "GBP" } },
-    { key: "five_year_price_change_pct", label: "Five-year change", format: { style: "percent", maximumFractionDigits: 1 } },
+    { key: "median_price", label: "Median sale price", format: { style: "currency", currency: "GBP" } },
+    { key: "transaction_count", label: "Transactions", format: { style: "number", maximumFractionDigits: 0 } },
   ],
   rows: [
-    { district: "HAVERING", latest_median_price: 445500, five_year_price_change_pct: 17.9 },
-    { district: "LAMBETH", latest_median_price: 526890, five_year_price_change_pct: -7.2 },
-    { district: "WANDSWORTH", latest_median_price: 630000, five_year_price_change_pct: -1.0 },
+    { district: "WANDSWORTH", median_price: 630000, transaction_count: 121000 },
+    { district: "LAMBETH", median_price: 526890, transaction_count: 104000 },
+    { district: "HAVERING", median_price: 445500, transaction_count: 98000 },
   ],
   stats: { rowsRead: 4030464, elapsedMs: 45, queryId: "fixture-table" },
   explanation,

@@ -10,7 +10,7 @@ import { Tile } from "@/components/tile-renderer";
 import type { DrillTarget } from "@/shared/view-spec";
 
 const EXAMPLES = [
-  "Which London borough rose fastest?",
+  "How did median prices change per year in London's top districts?",
   "Show Lambeth median prices by year since 2015",
   "Compare property types in Greater London by median price",
 ];

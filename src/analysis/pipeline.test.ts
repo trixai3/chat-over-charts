@@ -8,21 +8,21 @@ const stats = { rowsRead: 4030464, bytesRead: 120000000, elapsedMs: 45, queryId:
 describe("governed figure pipeline with UK house-price data", () => {
   it("renders a real-shaped London comparison with explanation and provenance", async () => {
     const plan = planAnalysis({
-      question: "Which London borough rose fastest?",
+      question: "Compare London boroughs by median price",
       sourceId: "uk-house-prices",
       analysisType: "category_comparison",
-      measures: ["latest median price", "five year growth"],
+      measures: ["median price", "transactions"],
       dimensions: [{ field: "borough" }],
       filters: [{ field: "county", operator: "equals", value: "Greater London" }],
-      orderBy: [{ field: "five year growth", direction: "desc" }],
+      orderBy: [{ field: "median price", direction: "desc" }],
     });
     if (plan.status !== "ready") throw new Error("Expected ready plan");
     const adapter: SourceAdapter = {
       execute: async () => ({
         rows: [
-          { district: "HAVERING", latest_median_price: 445500, five_year_price_change_pct: 17.9 },
-          { district: "LAMBETH", latest_median_price: 526890, five_year_price_change_pct: -7.2 },
-          { district: "WANDSWORTH", latest_median_price: 630000, five_year_price_change_pct: -1.0 },
+          { district: "WANDSWORTH", median_price: 630000, transaction_count: 121000 },
+          { district: "LAMBETH", median_price: 526890, transaction_count: 104000 },
+          { district: "HAVERING", median_price: 445500, transaction_count: 98000 },
         ],
         stats,
       }),
@@ -31,7 +31,7 @@ describe("governed figure pipeline with UK house-price data", () => {
     const result = await runAnalysis(plan, adapter);
     expect(result.spec.kind).toBe("comparison");
     if (result.spec.kind !== "comparison") return;
-    expect(result.spec.rows[0]).toMatchObject({ label: "HAVERING", value: 445500, delta: 17.9 });
+    expect(result.spec.rows[0]).toMatchObject({ label: "WANDSWORTH", value: 630000, delta: 121000 });
     expect(result.spec.explanation.calculation).toContain("quantileTDigest median");
     expect(result.spec.explanation.provenance.source).toBe("HM Land Registry Price Paid Data");
     expect(result.spec.explanation.inspect.generatedSql).toContain("{filter_0:String}");

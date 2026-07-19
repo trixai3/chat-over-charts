@@ -11,20 +11,20 @@ import { clickhouseKey } from "../src/shared/clickhouse";
 import { analysisTools } from "../src/agent/tools";
 
 const request = {
-  question: "Which London borough rose fastest?",
+  question: "Which London borough has the highest median price?",
   sourceId: "uk-house-prices",
   analysisType: "category_comparison",
-  measures: ["latest median price", "five year growth"],
+  measures: ["median price", "transactions"],
   dimensions: [{ field: "borough" }],
   filters: [{ field: "county", operator: "equals", value: "Greater London" }],
-  orderBy: [{ field: "five year growth", direction: "desc" }],
+  orderBy: [{ field: "median price", direction: "desc" }],
 };
 
 const fakeClickHouse = {
   query: async () => ({
     json: async () => [
-      { district: "HAVERING", latest_median_price: 445500, five_year_price_change_pct: 17.9 },
-      { district: "LAMBETH", latest_median_price: 526890, five_year_price_change_pct: -7.2 },
+      { district: "LAMBETH", median_price: 526890, transaction_count: 104000 },
+      { district: "HAVERING", median_price: 445500, transaction_count: 98000 },
     ],
     query_id: "agent-uk-test",
     response_headers: {
@@ -78,7 +78,7 @@ describe("governed analysis agent", () => {
       [toolCall("render-1", "renderAnalysis", request), finish("tool-calls")],
       [
         toolCall("verdict-1", "emitVerdict", {
-          headline: "Havering rose fastest: +17.9% over five years.",
+          headline: "Lambeth leads at a £526,890 median.",
           tone: "good",
         }),
         finish("tool-calls"),
@@ -101,7 +101,7 @@ describe("governed analysis agent", () => {
       expect(turn.chunks.filter((chunk) => chunk.type === "text-delta")).toHaveLength(0);
       expect(chunks).toContain('"kind":"comparison"');
       expect(chunks).toContain("HM Land Registry Price Paid Data");
-      expect(chunks).toContain("Havering rose fastest");
+      expect(chunks).toContain("Lambeth leads");
     } finally {
       await harness.close();
     }

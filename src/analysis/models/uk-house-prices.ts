@@ -1,14 +1,16 @@
 import type { SemanticModel } from "../types";
-
-const latestWindow = "date >= today() - INTERVAL 1 YEAR";
-const baselineWindow =
-  "date >= today() - INTERVAL 6 YEAR AND date < today() - INTERVAL 5 YEAR";
-const latestMedian = `round(quantileTDigestIf(0.5)(price, ${latestWindow}))`;
-const baselineMedian = `round(quantileTDigestIf(0.5)(price, ${baselineWindow}))`;
+import { ukHousePriceDimensionValues } from "./uk-house-prices.values";
 
 /**
  * A governed description of the existing Land Registry table. Adding another
  * source means registering another object with this contract, not adding tools.
+ *
+ * The source grain is one row per completed sale (~31M rows), so every
+ * displayed number aggregates many transactions. Measures are deliberately the
+ * minimum: a price level and a volume. Time math ("change", "growth") is the
+ * request-level `comparison`, and time scoping ("latest", "since 2015") is a
+ * date filter — neither is a stored measure, mirroring how Snowflake semantic
+ * models and Databricks metric views keep measures as plain aggregates.
  */
 export const ukHousePrices: SemanticModel = {
   id: "uk-house-prices",
@@ -19,12 +21,13 @@ export const ukHousePrices: SemanticModel = {
   sourceSystem: "HM Land Registry Price Paid Data",
   lastRefresh: "2026-05-29",
   availableRange: ["1995-01-01", "2026-05-29"],
-  version: "1.0.0",
+  version: "2.0.0",
   figurePolicyVersion: "1.0.0",
   defaults: {
     measure: "median_price",
     timeDimension: "sale_date",
     timeGrain: "year",
+    seriesRankMeasure: "transaction_count",
   },
   measures: {
     median_price: {
@@ -35,33 +38,10 @@ export const ukHousePrices: SemanticModel = {
       format: { style: "currency", currency: "GBP" },
       aggregation: "quantileTDigest median",
       version: "1.0.0",
-      synonyms: ["house price", "sale price", "property price", "median price"],
+      synonyms: ["house price", "sale price", "property price", "median price", "price", "prices"],
       limitations: [
         "Price changes can reflect a changing mix of property types sold as well as market movement.",
       ],
-    },
-    latest_median_price: {
-      id: "latest_median_price",
-      label: "Latest median sale price",
-      description: "Median completed transaction price during the trailing twelve months.",
-      expression: latestMedian,
-      format: { style: "currency", currency: "GBP" },
-      aggregation: "trailing-12-month quantileTDigest median",
-      version: "1.0.0",
-      synonyms: ["current price", "latest price", "recent median price"],
-      limitations: ["The latest period is a rolling twelve-month window, not a calendar year."],
-    },
-    five_year_price_change_pct: {
-      id: "five_year_price_change_pct",
-      label: "Five-year median-price change",
-      description:
-        "Percentage change between the trailing twelve-month median and the equivalent window five years earlier.",
-      expression: `round(100 * (${latestMedian} - ${baselineMedian}) / nullIf(${baselineMedian}, 0), 1)`,
-      format: { style: "percent", maximumFractionDigits: 1 },
-      aggregation: "change between two governed median windows",
-      version: "1.0.0",
-      synonyms: ["five year growth", "5 year growth", "price growth", "price change"],
-      limitations: ["This is descriptive historical change and is not a forecast."],
     },
     transaction_count: {
       id: "transaction_count",
@@ -71,7 +51,7 @@ export const ukHousePrices: SemanticModel = {
       format: { style: "number", maximumFractionDigits: 0 },
       aggregation: "count",
       version: "1.0.0",
-      synonyms: ["sales", "sale count", "transactions", "number of sales"],
+      synonyms: ["sales", "sale count", "transactions", "number of sales", "volume"],
       limitations: [],
     },
   },
@@ -99,6 +79,7 @@ export const ukHousePrices: SemanticModel = {
       synonyms: ["county", "counties"],
       cardinality: 132,
       valueNormalization: "uppercase",
+      values: ukHousePriceDimensionValues.county,
     },
     district: {
       id: "district",
@@ -109,6 +90,7 @@ export const ukHousePrices: SemanticModel = {
       synonyms: ["district", "borough", "area", "districts", "boroughs", "areas"],
       cardinality: 467,
       valueNormalization: "uppercase",
+      values: ukHousePriceDimensionValues.district,
     },
     town: {
       id: "town",
@@ -119,6 +101,7 @@ export const ukHousePrices: SemanticModel = {
       synonyms: ["town", "city", "towns", "cities"],
       cardinality: 1173,
       valueNormalization: "uppercase",
+      values: ukHousePriceDimensionValues.town,
     },
     property_type: {
       id: "property_type",
@@ -129,6 +112,7 @@ export const ukHousePrices: SemanticModel = {
       synonyms: ["property type", "home type", "type"],
       cardinality: 5,
       valueNormalization: "lowercase",
+      values: ukHousePriceDimensionValues.property_type,
     },
     tenure: {
       id: "tenure",
@@ -139,6 +123,7 @@ export const ukHousePrices: SemanticModel = {
       synonyms: ["tenure", "duration", "freehold", "leasehold"],
       cardinality: 3,
       valueNormalization: "lowercase",
+      values: ukHousePriceDimensionValues.tenure,
     },
   },
 };

@@ -8,8 +8,9 @@ import type {
   SemanticDimension,
   SemanticMeasure,
   SemanticModel,
+  SeriesSelection,
 } from "./types";
-import { selectProvisionalFigure } from "./chart-policy";
+import { MAX_LINE_SERIES, selectProvisionalFigure } from "./chart-policy";
 
 const MODELS: Record<string, SemanticModel> = {
   [ukHousePrices.id]: ukHousePrices,
@@ -56,9 +57,214 @@ function resolveField(field: AnalysisField, model: SemanticModel): AnalysisField
   return { field: dimension.id, grain: field.grain };
 }
 
-function resolveFilter(filter: AnalysisFilter, model: SemanticModel): AnalysisFilter | undefined {
+function normalizedFilterValue(value: string, dimension: SemanticDimension): string {
+  if (dimension.valueNormalization === "uppercase") return value.toUpperCase();
+  if (dimension.valueNormalization === "lowercase") return value.toLowerCase();
+  return value;
+}
+
+type ValueCandidate = { dimension: SemanticDimension; value: string; exact: boolean };
+
+/**
+ * Search every governed value domain for a user-supplied filter value. "London"
+ * is an exact town, but also part of the county GREATER LONDON and the district
+ * CITY OF LONDON — each a materially different population.
+ *
+ * Matching is asymmetric on purpose. A governed value that CONTAINS the term
+ * ("London" → GREATER LONDON) is a genuine broader reading and always competes.
+ * A governed value that is merely a FRAGMENT of the term ("Greater London" ⊃
+ * town LONDON) only counts when nothing matches exactly — no one who typed the
+ * full county name meant the fragment.
+ */
+function findValueCandidates(term: string, model: SemanticModel): ValueCandidate[] {
+  const exact: ValueCandidate[] = [];
+  const broader: ValueCandidate[] = [];
+  const fragments: ValueCandidate[] = [];
+  for (const dimension of Object.values(model.dimensions)) {
+    if (dimension.kind !== "category" || !dimension.values) continue;
+    const target = normalizedFilterValue(term, dimension);
+    if (target.length === 0) continue;
+    for (const value of dimension.values) {
+      if (value === target) exact.push({ dimension, value, exact: true });
+      else if (value.includes(target)) broader.push({ dimension, value, exact: false });
+      else if (target.includes(value)) fragments.push({ dimension, value, exact: false });
+    }
+  }
+  const candidates =
+    exact.length > 0 ? [...exact, ...broader] : [...broader, ...fragments];
+  // Exact matches first, then coarser (lower-cardinality) geographies.
+  return candidates.sort(
+    (a, b) =>
+      Number(b.exact) - Number(a.exact) ||
+      (a.dimension.cardinality ?? a.dimension.values!.length) -
+        (b.dimension.cardinality ?? b.dimension.values!.length) ||
+      a.value.localeCompare(b.value),
+  );
+}
+
+type FilterResolution =
+  | { status: "ok"; filter: AnalysisFilter }
+  | { status: "unknown_field" }
+  | { status: "ambiguous_value"; term: string; candidates: ValueCandidate[] }
+  | { status: "unknown_value"; term: string; dimension: SemanticDimension };
+
+/**
+ * Resolves the filter field through synonyms, then validates string values for
+ * equals/in against the dimension's governed value domain (design §5.3
+ * "multiple possible matches" / §5.4). Dimensions without a snapshot keep the
+ * old passthrough behaviour.
+ */
+/**
+ * When the field term is unknown ("location", "place"), the reference data can
+ * usually answer without asking: look the VALUE up across every governed value
+ * domain. "Lambeth" appears only as a district, so field and value both
+ * resolve; only a genuinely ambiguous value (e.g. "London") needs a question.
+ */
+function inferFieldFromValue(
+  filter: AnalysisFilter,
+  model: SemanticModel,
+): FilterResolution | undefined {
+  const terms = Array.isArray(filter.value) ? filter.value : [filter.value];
+  if (filter.operator !== "equals" && filter.operator !== "in") return undefined;
+  if (!terms.every((term) => typeof term === "string")) return undefined;
+
+  const perTerm = (terms as string[]).map((term) => ({
+    term,
+    candidates: findValueCandidates(term, model),
+  }));
+  if (perTerm.some((entry) => entry.candidates.length === 0)) return undefined;
+
+  // A dimension fits when every term resolves to exactly one value inside it.
+  const fittingDimensions = Object.values(model.dimensions).filter((dimension) =>
+    perTerm.every(
+      (entry) =>
+        entry.candidates.filter((candidate) => candidate.dimension.id === dimension.id)
+          .length === 1,
+    ),
+  );
+  if (fittingDimensions.length === 1) {
+    const dimension = fittingDimensions[0];
+    const values = perTerm.map(
+      (entry) =>
+        entry.candidates.find((candidate) => candidate.dimension.id === dimension.id)!.value,
+    );
+    return {
+      status: "ok",
+      filter: {
+        ...filter,
+        field: dimension.id,
+        value: filter.operator === "in" ? values : values[0],
+      },
+    };
+  }
+  const ambiguous =
+    perTerm.find((entry) => entry.candidates.length > 1) ?? perTerm[0];
+  return {
+    status: "ambiguous_value",
+    term: ambiguous.term,
+    candidates: ambiguous.candidates,
+  };
+}
+
+/**
+ * Users say "since 2015", not "since 2015-01-01". Bare years and months are
+ * well-defined date ranges, so they normalize deterministically; only truly
+ * unparseable values are refused before SQL exists.
+ */
+function normalizeDateBound(raw: unknown, edge: "start" | "end"): string | undefined {
+  const text = String(raw).trim();
+  if (/^\d{4}$/.test(text)) return edge === "start" ? `${text}-01-01` : `${text}-12-31`;
+  if (/^\d{4}-\d{2}$/.test(text)) {
+    if (edge === "start") return `${text}-01`;
+    const [year, month] = text.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return `${text}-${String(lastDay).padStart(2, "0")}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  return undefined;
+}
+
+function resolveTimeFilter(
+  filter: AnalysisFilter,
+  dimension: SemanticDimension,
+): FilterResolution {
+  const fail = (term: string): FilterResolution => ({ status: "unknown_value", term, dimension });
+  switch (filter.operator) {
+    case "gte":
+    case "lte": {
+      const edge = filter.operator === "gte" ? "start" : "end";
+      const bound = normalizeDateBound(filter.value, edge);
+      return bound ? { status: "ok", filter: { ...filter, value: bound } } : fail(String(filter.value));
+    }
+    case "between": {
+      if (!Array.isArray(filter.value) || filter.value.length !== 2) return fail(String(filter.value));
+      const from = normalizeDateBound(filter.value[0], "start");
+      const to = normalizeDateBound(filter.value[1], "end");
+      return from && to
+        ? { status: "ok", filter: { ...filter, value: [from, to] } }
+        : fail(String(filter.value[0]));
+    }
+    case "equals": {
+      // "in 2015" means the whole year, not one calendar day.
+      const from = normalizeDateBound(filter.value, "start");
+      const to = normalizeDateBound(filter.value, "end");
+      if (!from || !to) return fail(String(filter.value));
+      return from === to
+        ? { status: "ok", filter: { ...filter, value: from } }
+        : { status: "ok", filter: { ...filter, operator: "between", value: [from, to] } };
+    }
+    default:
+      return { status: "ok", filter };
+  }
+}
+
+function resolveFilter(filter: AnalysisFilter, model: SemanticModel): FilterResolution {
   const dimension = resolveEntry(filter.field, model.dimensions);
-  return dimension ? { ...filter, field: dimension.id } : undefined;
+  if (!dimension) {
+    return inferFieldFromValue(filter, model) ?? { status: "unknown_field" };
+  }
+  if (dimension.kind === "time") {
+    return resolveTimeFilter({ ...filter, field: dimension.id }, dimension);
+  }
+  const resolved: AnalysisFilter = { ...filter, field: dimension.id };
+  const validatable =
+    dimension.kind === "category" &&
+    dimension.values !== undefined &&
+    (filter.operator === "equals" || filter.operator === "in");
+  if (!validatable) return { status: "ok", filter: resolved };
+
+  const terms = Array.isArray(filter.value) ? filter.value : [filter.value];
+  const rewritten: string[] = [];
+  for (const raw of terms) {
+    if (typeof raw !== "string") return { status: "ok", filter: resolved };
+    if (dimension.values!.includes(normalizedFilterValue(raw, dimension))) {
+      rewritten.push(raw);
+      continue;
+    }
+    const candidates = findValueCandidates(raw, model);
+    if (candidates.length === 0) return { status: "unknown_value", term: raw, dimension };
+    const sameDimension = candidates.filter(
+      (candidate) => candidate.dimension.id === dimension.id,
+    );
+    // A single governed interpretation is a correction, not a guess. Inside an
+    // `in` list it must stay in the same dimension — one filter cannot span two.
+    if (candidates.length === 1 && filter.operator === "equals") {
+      const only = candidates[0];
+      return {
+        status: "ok",
+        filter: { ...resolved, field: only.dimension.id, value: only.value },
+      };
+    }
+    if (sameDimension.length === 1 && filter.operator === "in") {
+      rewritten.push(sameDimension[0].value);
+      continue;
+    }
+    return { status: "ambiguous_value", term: raw, candidates };
+  }
+  return {
+    status: "ok",
+    filter: filter.operator === "in" ? { ...resolved, value: rewritten } : resolved,
+  };
 }
 
 const ANALYSIS_LABELS: Record<AnalysisType, string> = {
@@ -97,10 +303,83 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     };
   }
 
-  const measureTerms = draft.measures.length > 0 ? draft.measures : [model.defaults.measure];
-  const measures = measureTerms.map((term) => resolveEntry(term, model.measures));
+  // Design §2: never silently guess a material analytical choice. An empty
+  // measure list previously defaulted to the model's median — ask instead.
+  if (draft.measures.length === 0) {
+    return {
+      status: "needs_clarification",
+      resolved: { ...draft },
+      ambiguities: [
+        {
+          field: "measures",
+          question: "Which governed measure should the figure show?",
+          options: Object.values(model.measures).map((measure) => ({
+            id: measure.id,
+            label: measure.label,
+            description: measure.description,
+          })),
+          recommended: model.defaults.measure,
+          reason: "The question did not name a measure, and defaults are only applied when you confirm them.",
+        },
+      ],
+    };
+  }
+
+  // "price change" / "sales growth" is a base measure plus the query-time
+  // comparison, not its own measure — resolving it that way is exact, so no
+  // clarification is needed (measures stay plain aggregates).
+  const stripChangeWords = (term: string) => {
+    const base = term
+      .replace(/\b(change|changes|growth|grew|increase|decrease|delta)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return { base, hadChangeWord: normalized(base) !== normalized(term) };
+  };
+  let comparison = draft.comparison;
+  const measureTerms = draft.measures;
+  const measures = measureTerms.map((term) => {
+    const direct = resolveEntry(term, model.measures);
+    if (direct) return direct;
+    const { base, hadChangeWord } = stripChangeWords(term);
+    if (!hadChangeWord || base.length === 0) return undefined;
+    const viaChange = resolveEntry(base, model.measures);
+    if (viaChange) comparison = "vs_previous_period";
+    return viaChange;
+  });
   const missingMeasure = measureTerms.find((_, index) => !measures[index]);
   if (missingMeasure) {
+    // Design §9.1: the aggregation is material. "average X" must not silently
+    // become a median — surface the governed equivalent and ask.
+    const strippedAggregation = missingMeasure.replace(/^\s*(average|avg|mean)\s+/i, "");
+    const aggregationBase = stripChangeWords(strippedAggregation);
+    const lossyMatch =
+      strippedAggregation !== missingMeasure
+        ? (resolveEntry(strippedAggregation, model.measures) ??
+          (aggregationBase.hadChangeWord
+            ? resolveEntry(aggregationBase.base, model.measures)
+            : undefined))
+        : undefined;
+    if (lossyMatch) {
+      return {
+        status: "needs_clarification",
+        resolved: { ...draft },
+        ambiguities: [
+          {
+            field: "measures",
+            question: `“${missingMeasure}” is not governed here: averages are misleading for right-skewed prices, so this source publishes medians. Use “${lossyMatch.label}”${
+              aggregationBase.hadChangeWord ? ' with comparison "vs_previous_period"' : ""
+            } instead?`,
+            options: Object.values(model.measures).map((measure) => ({
+              id: measure.id,
+              label: measure.label,
+              description: measure.description,
+            })),
+            recommended: lossyMatch.id,
+            reason: "Switching between average and median changes the business meaning, so it needs confirmation.",
+          },
+        ],
+      };
+    }
     return {
       status: "needs_clarification",
       resolved: { ...draft },
@@ -160,6 +439,20 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     ];
   }
 
+  // The one temporal rule left: a change versus the previous period is
+  // undefined without ordered periods (design §15.2, reduced to its essence).
+  const hasTimeDimension = dimensions.some(
+    (field) => field && model.dimensions[field.field]?.kind === "time",
+  );
+  if (comparison && !hasTimeDimension) {
+    return {
+      status: "unsupported",
+      reason:
+        "A change versus the previous period needs a time dimension. Ask for a trend over time, or drop the change.",
+      suggestions: ["Re-draft with analysisType \"trend\"."],
+    };
+  }
+
   if (
     draft.analysisType === "category_comparison" &&
     !dimensions.some((field) => field && model.dimensions[field.field]?.kind === "category")
@@ -181,8 +474,10 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     };
   }
 
-  const filters = draft.filters.map((filter) => resolveFilter(filter, model));
-  const missingFilter = draft.filters.find((_, index) => !filters[index]);
+  const filterResolutions = draft.filters.map((filter) => resolveFilter(filter, model));
+  const missingFilter = draft.filters.find(
+    (_, index) => filterResolutions[index].status === "unknown_field",
+  );
   if (missingFilter) {
     return {
       status: "needs_clarification",
@@ -200,6 +495,106 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
         },
       ],
     };
+  }
+  for (const resolution of filterResolutions) {
+    if (resolution.status === "ambiguous_value") {
+      return {
+        status: "needs_clarification",
+        resolved: { ...draft },
+        ambiguities: [
+          {
+            field: "filters",
+            question: `“${resolution.term}” matches more than one governed value. Which population should the filter select?`,
+            options: resolution.candidates.slice(0, 8).map((candidate) => ({
+              id: `${candidate.dimension.id}=${candidate.value}`,
+              label: `${candidate.value} (${candidate.dimension.label})`,
+              description: `Call inspectAnalysis again filtering ${candidate.dimension.id} equals "${candidate.value}".`,
+            })),
+            recommended: `${resolution.candidates[0].dimension.id}=${resolution.candidates[0].value}`,
+            reason:
+              "The same term appears in several governed dimensions, and each choice selects a materially different population.",
+          },
+        ],
+      };
+    }
+    if (resolution.status === "unknown_value") {
+      return {
+        status: "unsupported",
+        reason: `No governed ${resolution.dimension.label} value matches “${resolution.term}”.`,
+        suggestions: [
+          "Check the spelling, or ask what values exist for this dimension.",
+        ],
+      };
+    }
+  }
+  const filters = filterResolutions.map(
+    (resolution) => (resolution as Extract<FilterResolution, { status: "ok" }>).filter,
+  );
+
+  // Design §5.4/§9.1: consult capability metadata BEFORE querying. A trend
+  // over a wide category must not run, hit the row cap, and dead-end — it asks
+  // for a supported series scope instead.
+  const categoryField = dimensions.find(
+    (field) => field && model.dimensions[field.field]?.kind === "category",
+  );
+  let seriesSelection: (SeriesSelection & { by: string }) | undefined;
+  if (draft.analysisType === "trend" && categoryField) {
+    const dimension = model.dimensions[categoryField.field];
+    const scopeFilter = filters.find((filter) => filter?.field === dimension.id);
+    const estimatedSeries =
+      scopeFilter?.operator === "equals"
+        ? 1
+        : scopeFilter?.operator === "in" && Array.isArray(scopeFilter.value)
+          ? scopeFilter.value.length
+          : (dimension.cardinality ?? 0);
+
+    if (draft.seriesSelection) {
+      const rankTerm =
+        draft.seriesSelection.by ?? model.defaults.seriesRankMeasure ?? measures[0]!.id;
+      const rankMeasure = resolveEntry(rankTerm, model.measures);
+      if (!rankMeasure) {
+        return {
+          status: "unsupported",
+          reason: `The series-ranking measure “${rankTerm}” is not in the semantic model.`,
+          suggestions: Object.keys(model.measures),
+        };
+      }
+      seriesSelection = {
+        method: "top",
+        n: Math.min(Math.max(draft.seriesSelection.n, 1), MAX_LINE_SERIES),
+        by: rankMeasure.id,
+      };
+    } else if (estimatedSeries > MAX_LINE_SERIES) {
+      const rankLabel =
+        resolveEntry(model.defaults.seriesRankMeasure ?? measures[0]!.id, model.measures)
+          ?.label ?? measures[0]!.label;
+      return {
+        status: "needs_clarification",
+        resolved: { ...draft },
+        ambiguities: [
+          {
+            field: "seriesSelection",
+            question: `Up to ${estimatedSeries} ${dimension.label.toLowerCase()} values match, but one readable line chart supports at most ${MAX_LINE_SERIES} series. How should the scope be narrowed?`,
+            options: [
+              {
+                id: "top_series",
+                label: `Top ${MAX_LINE_SERIES} by ${rankLabel.toLowerCase()}`,
+                description: `Call inspectAnalysis again with seriesSelection { "method": "top", "n": ${MAX_LINE_SERIES} }.`,
+              },
+              {
+                id: "switch_to_comparison",
+                label: `Compare ${dimension.label.toLowerCase()} values at one point in time instead`,
+                description:
+                  "Call inspectAnalysis again as a category_comparison without the time dimension.",
+              },
+            ],
+            recommended: "top_series",
+            reason:
+              "Silent truncation is forbidden, so the series scope is a user choice (figure policy, series limit).",
+          },
+        ],
+      };
+    }
   }
 
   const orderBy = draft.orderBy.map((order) => {
@@ -220,8 +615,10 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     analysisType: draft.analysisType,
     measures: measures.map((measure) => measure!.id),
     dimensions: dimensions.map((dimension) => dimension!),
-    filters: filters.map((filter) => filter!),
+    filters,
     orderBy: orderBy.map((order) => order!),
+    seriesSelection,
+    comparison,
   };
   const figure = selectProvisionalFigure(request, model);
   if (figure.status !== "selected") {

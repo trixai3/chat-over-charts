@@ -23,6 +23,24 @@ export type AnalysisOrder = {
   direction: "asc" | "desc";
 };
 
+/**
+ * Design §13 `series_selection`: an explicit, user-confirmed rule for keeping a
+ * multi-series figure readable. Never applied silently (design §14.3).
+ */
+export type SeriesSelection = {
+  method: "top";
+  n: number;
+  /** Governed measure term (draft) or ID (resolved) used to rank the series. */
+  by?: string;
+};
+
+/**
+ * Query-time transform applied to every requested measure (design §5.7
+ * "comparison calculations"): the % change versus the previous displayed
+ * period. Requires a time dimension.
+ */
+export type Comparison = "vs_previous_period";
+
 /** Terms may be semantic IDs, labels, or registered synonyms. */
 export type AnalysisDraft = {
   question: string;
@@ -34,11 +52,14 @@ export type AnalysisDraft = {
   orderBy: AnalysisOrder[];
   preferredFigure?: FigureKind;
   limit?: number;
+  seriesSelection?: SeriesSelection;
+  comparison?: Comparison;
 };
 
 /** Every field has been resolved to a governed semantic ID. */
-export type ResolvedAnalysisRequest = Omit<AnalysisDraft, "analysisType"> & {
+export type ResolvedAnalysisRequest = Omit<AnalysisDraft, "analysisType" | "seriesSelection"> & {
   analysisType: AnalysisType;
+  seriesSelection?: SeriesSelection & { by: string };
 };
 
 export type Clarification = {
@@ -60,7 +81,8 @@ export type AnalysisPlanResult =
   | AnalysisPlan
   | {
       status: "needs_clarification";
-      resolved: Partial<ResolvedAnalysisRequest>;
+      /** The draft as far as it resolved; terms in it may still be ungoverned. */
+      resolved: Partial<AnalysisDraft>;
       ambiguities: Clarification[];
     }
   | {
@@ -71,6 +93,12 @@ export type AnalysisPlanResult =
 
 export type DimensionKind = "time" | "category" | "identifier";
 
+/**
+ * A measure is always a plain aggregate over the fact table — the same rule as
+ * a Snowflake semantic model fact or a Databricks metric-view measure. Time
+ * math (change, growth) is a query-time `comparison` on the request, never a
+ * stored measure, so any measure is valid at any displayed grain.
+ */
 export type SemanticMeasure = {
   id: string;
   label: string;
@@ -92,6 +120,13 @@ export type SemanticDimension = {
   synonyms: string[];
   cardinality?: number;
   valueNormalization?: "uppercase" | "lowercase";
+  /**
+   * Governed value domain, snapshotted at onboarding (design §5.4; the
+   * `sample_values` role in a Snowflake semantic model). When present, filter
+   * values are validated and disambiguated against it before SQL exists.
+   * Stored in the same normalization as the source column.
+   */
+  values?: string[];
   grains?: Partial<Record<TimeGrain, string>>;
 };
 
@@ -112,6 +147,8 @@ export type SemanticModel = {
     measure: string;
     timeDimension?: string;
     timeGrain?: TimeGrain;
+    /** Measure used to rank series for a confirmed top-N selection. */
+    seriesRankMeasure?: string;
   };
 };
 

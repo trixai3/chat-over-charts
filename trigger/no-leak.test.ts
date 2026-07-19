@@ -9,20 +9,20 @@ import { houseAgent } from "./house-agent";
 import { clickhouseKey } from "../src/shared/clickhouse";
 
 const request = {
-  question: "Which London borough rose fastest?",
+  question: "Which London borough has the highest median price?",
   sourceId: "uk-house-prices",
   analysisType: "category_comparison",
-  measures: ["latest median price", "five year growth"],
+  measures: ["median price", "transactions"],
   dimensions: [{ field: "borough" }],
   filters: [{ field: "county", operator: "equals", value: "Greater London" }],
-  orderBy: [{ field: "five year growth", direction: "desc" }],
+  orderBy: [{ field: "median price", direction: "desc" }],
 };
 
 const fakeClickHouse = {
   query: async () => ({
     json: async () => [
-      { district: "HAVERING", latest_median_price: 445500, five_year_price_change_pct: 17.9 },
-      { district: "LAMBETH", latest_median_price: 526890, five_year_price_change_pct: -7.2 },
+      { district: "LAMBETH", median_price: 526890, transaction_count: 104000 },
+      { district: "HAVERING", median_price: 445500, transaction_count: 98000 },
     ],
     query_id: "no-leak-uk",
     response_headers: {
@@ -89,7 +89,7 @@ describe("cross-turn result compression", () => {
       expect(prompt2).toContain("categories. First");
       expect(prompt2).not.toContain('"generatedSql"');
       expect(prompt2).not.toContain('"metricLabel"');
-      expect(prompt2).not.toContain("quantileTDigestIf");
+      expect(prompt2).not.toContain("quantileTDigest");
 
       const prompt3 = JSON.stringify(model.doStreamCalls[turn3]!.prompt);
       expect(prompt3).not.toContain('"generatedSql"');
