@@ -19,7 +19,7 @@ export function DistributionTile({ spec }: { spec: Spec }) {
     spec.median !== undefined ? ((spec.median - lo) / (hi - lo || 1)) * 100 : undefined;
 
   return (
-    <TileFrame title={spec.title} stats={spec.stats}>
+    <TileFrame title={spec.title} stats={spec.stats} explanation={spec.explanation}>
       <div className="relative">
         <div className="flex h-32 items-end gap-[2px]">
           {spec.bins.map((b) => (
@@ -27,7 +27,7 @@ export function DistributionTile({ spec }: { spec: Spec }) {
               key={`${b.from}-${b.to}`}
               className="flex-1 rounded-t-[2px] bg-sky-500/60"
               style={{ height: `${Math.max((b.count / maxCount) * 100, 1)}%` }}
-              title={`${formatValue(b.from, spec.unit)}–${formatValue(b.to, spec.unit)}: ${b.count}`}
+              title={`${formatValue(b.from, spec.format)}–${formatValue(b.to, spec.format)}: ${b.count}`}
             />
           ))}
         </div>
@@ -37,14 +37,14 @@ export function DistributionTile({ spec }: { spec: Spec }) {
             style={{ left: `${medianPct}%` }}
           >
             <span className="absolute -top-1 left-1 font-mono text-[10px] whitespace-nowrap text-amber-600 dark:text-amber-400">
-              median {formatValue(spec.median!, spec.unit)}
+              median {formatValue(spec.median!, spec.format)}
             </span>
           </div>
         )}
       </div>
       <div className="mt-1 flex justify-between font-mono text-[11px] text-black/40 dark:text-white/40">
-        <span>{formatValue(lo, spec.unit)}</span>
-        <span>{formatValue(hi, spec.unit)}</span>
+        <span>{formatValue(lo, spec.format)}</span>
+        <span>{formatValue(hi, spec.format)}</span>
       </div>
     </TileFrame>
   );

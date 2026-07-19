@@ -2,9 +2,8 @@
 
 import { useCallback, useState } from "react";
 import { useChat } from "@ai-sdk/react";
+import { lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { useTriggerChatTransport } from "@trigger.dev/sdk/chat/react";
-// Type-only: erased at compile, so no server-only agent code reaches the bundle.
-// It just types the transport's task id and clientData against the real agent.
 import type { houseAgent } from "../../trigger/house-agent";
 import { mintChatAccessToken, startChatSession } from "@/app/actions";
 import { Tile } from "@/components/tile-renderer";
@@ -12,38 +11,85 @@ import type { DrillTarget } from "@/shared/view-spec";
 
 const EXAMPLES = [
   "Which London borough rose fastest?",
-  "Compare districts in Greater Manchester by price",
-  "Where is cheapest in West Yorkshire?",
+  "Show Lambeth median prices by year since 2015",
+  "Compare property types in Greater London by median price",
 ];
 
-/**
- * A message part carrying a finished tool result. Every one of our tools returns
- * a ViewSpec as its output, so `output` is exactly what the Tile renderer wants
- * — comparison and verdict alike. We don't trust the type here; Tile's safeParse
- * is the single validation boundary that turns bad data into a broken tile.
- */
+/** Only presentation tools produce ViewSpecs; planning output stays invisible. */
 function toolOutputs(parts: readonly unknown[]): unknown[] {
   return parts
-    .filter((p): p is { type: string; state?: string; output?: unknown } => {
-      if (typeof p !== "object" || p === null) return false;
-      const part = p as { type?: unknown; state?: unknown; output?: unknown };
+    .filter((part): part is { type: string; state?: string; output?: unknown } => {
+      if (typeof part !== "object" || part === null) return false;
+      const candidate = part as { type?: unknown; state?: unknown; output?: unknown };
       return (
-        typeof part.type === "string" &&
-        part.type.startsWith("tool-") &&
-        part.state === "output-available" &&
-        part.output !== undefined
+        (candidate.type === "tool-renderAnalysis" || candidate.type === "tool-emitVerdict") &&
+        candidate.state === "output-available" &&
+        candidate.output !== undefined
       );
     })
-    .map((p) => p.output);
+    .map((part) => part.output);
+}
+
+type PendingClarification = {
+  toolCallId: string;
+  field: string;
+  question: string;
+  options: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    recommended?: boolean;
+  }>;
+};
+
+function pendingClarifications(parts: readonly unknown[]): PendingClarification[] {
+  return parts.flatMap((part) => {
+    if (typeof part !== "object" || part === null) return [];
+    const candidate = part as {
+      type?: unknown;
+      state?: unknown;
+      toolCallId?: unknown;
+      input?: unknown;
+    };
+    if (
+      candidate.type !== "tool-requestClarification" ||
+      candidate.state !== "input-available" ||
+      typeof candidate.toolCallId !== "string" ||
+      typeof candidate.input !== "object" ||
+      candidate.input === null
+    ) return [];
+
+    const input = candidate.input as { field?: unknown; question?: unknown; options?: unknown };
+    if (
+      typeof input.field !== "string" ||
+      typeof input.question !== "string" ||
+      !Array.isArray(input.options)
+    ) return [];
+    const options = input.options.filter(
+      (option): option is PendingClarification["options"][number] =>
+        typeof option === "object" &&
+        option !== null &&
+        typeof (option as { id?: unknown }).id === "string" &&
+        typeof (option as { label?: unknown }).label === "string",
+    );
+    return [{
+      toolCallId: candidate.toolCallId,
+      field: input.field,
+      question: input.question,
+      options,
+    }];
+  });
 }
 
 function messageText(parts: readonly unknown[]): string {
   return parts
     .filter(
-      (p): p is { type: "text"; text: string } =>
-        typeof p === "object" && p !== null && (p as { type?: unknown }).type === "text",
+      (part): part is { type: "text"; text: string } =>
+        typeof part === "object" &&
+        part !== null &&
+        (part as { type?: unknown }).type === "text",
     )
-    .map((p) => p.text)
+    .map((part) => part.text)
     .join("");
 }
 
@@ -53,23 +99,24 @@ export function Chat() {
     accessToken: ({ chatId }) => mintChatAccessToken(chatId),
     startSession: ({ chatId, clientData }) => startChatSession({ chatId, clientData }),
   });
-
-  const { messages, sendMessage, stop, status } = useChat({ transport });
+  const { messages, sendMessage, addToolOutput, stop, status } = useChat({
+    transport,
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+  });
   const [input, setInput] = useState("");
 
   const submit = useCallback(
     (text: string) => {
-      const q = text.trim();
-      if (!q) return;
-      sendMessage({ text: q });
+      const question = text.trim();
+      if (!question) return;
+      sendMessage({ text: question });
       setInput("");
     },
     [sendMessage],
   );
 
-  // Drill-down is Day 4 (onAction). Log for now so the wiring is visible.
-  const onDrill = (t: DrillTarget) => console.log("drill:", t);
-
+  // Deliberate placeholder: drill behavior is outside this redesign.
+  const onDrill = (target: DrillTarget) => console.log("drill placeholder:", target);
   const isStreaming = status === "streaming" || status === "submitted";
   const empty = messages.length === 0;
 
@@ -78,64 +125,103 @@ export function Chat() {
       <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight">Beyond the Wall of Text</h1>
         <p className="mt-1 text-sm text-black/50 dark:text-white/50">
-          Ask about UK house prices. The answer is a chart, never a paragraph.
+          Ask an analytical question. The answer is a governed figure, never a paragraph.
         </p>
       </header>
 
       {empty ? (
         <div className="flex flex-col gap-2">
           <p className="text-xs font-medium text-black/40 dark:text-white/40">Try asking</p>
-          {EXAMPLES.map((q) => (
+          {EXAMPLES.map((question) => (
             <button
-              key={q}
+              key={question}
               type="button"
-              onClick={() => submit(q)}
+              onClick={() => submit(question)}
               className="rounded-lg border border-black/10 bg-black/[0.02] px-4 py-3 text-left text-sm transition-colors hover:bg-black/[0.05] dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
             >
-              {q}
+              {question}
             </button>
           ))}
         </div>
       ) : (
         <div className="flex flex-1 flex-col gap-6">
-          {messages.map((m) => {
-            if (m.role === "user") {
+          {messages.map((message) => {
+            if (message.role === "user") {
               return (
-                <div key={m.id} className="self-end">
+                <div key={message.id} className="self-end">
                   <div className="rounded-2xl bg-black px-4 py-2 text-sm text-white dark:bg-white dark:text-black">
-                    {messageText(m.parts)}
+                    {messageText(message.parts)}
                   </div>
                 </div>
               );
             }
-            const tiles = toolOutputs(m.parts);
+            const tiles = toolOutputs(message.parts);
+            const clarifications = pendingClarifications(message.parts);
             return (
-              <div key={m.id} className="flex flex-col gap-4">
-                {tiles.map((spec, i) => (
-                  <Tile key={i} part={spec} onDrill={onDrill} onResolve={onDrill} />
+              <div key={message.id} className="flex flex-col gap-4">
+                {clarifications.map((clarification) => (
+                  <div
+                    key={clarification.toolCallId}
+                    className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4"
+                  >
+                    <p className="text-sm font-medium">{clarification.question}</p>
+                    <p className="mt-0.5 font-mono text-[10px] text-black/40 dark:text-white/40">
+                      Governed clarification · run suspended
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {clarification.options.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => addToolOutput({
+                            tool: "requestClarification",
+                            toolCallId: clarification.toolCallId,
+                            output: {
+                              field: clarification.field,
+                              optionId: option.id,
+                              label: option.label,
+                            },
+                          })}
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-left hover:border-amber-500/50 hover:bg-amber-500/10 dark:border-white/15 dark:bg-white/5"
+                        >
+                          <span className="block text-xs font-medium">
+                            {option.label}{option.recommended ? " · recommended" : ""}
+                          </span>
+                          {option.description && (
+                            <span className="block text-[10px] text-black/40 dark:text-white/40">
+                              {option.description}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {tiles.map((spec, index) => (
+                  <Tile key={index} part={spec} onDrill={onDrill} onResolve={onDrill} />
                 ))}
               </div>
             );
           })}
           {isStreaming && (
             <p className="animate-pulse text-xs text-black/40 dark:text-white/40">
-              Thinking — running the tool loop…
+              Resolving semantics · planning query · validating figure…
             </p>
           )}
         </div>
       )}
 
       <form
-        onSubmit={(e) => {
-          e.preventDefault();
+        onSubmit={(event) => {
+          event.preventDefault();
           submit(input);
         }}
         className="sticky bottom-6 mt-8 flex gap-2"
       >
         <input
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about UK house prices…"
+          onChange={(event) => setInput(event.target.value)}
+          placeholder="Ask about the connected data…"
           className="flex-1 rounded-full border border-black/15 bg-white px-5 py-3 text-sm outline-none focus:border-black/40 dark:border-white/15 dark:bg-black dark:focus:border-white/40"
         />
         {isStreaming ? (

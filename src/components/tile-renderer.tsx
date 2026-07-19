@@ -7,6 +7,9 @@ import { TimeseriesTile } from "./tiles/timeseries-tile";
 import { ComparisonTile } from "./tiles/comparison-tile";
 import { DistributionTile } from "./tiles/distribution-tile";
 import { DisambiguationTile } from "./tiles/disambiguation-tile";
+import { KpiTile } from "./tiles/kpi-tile";
+import { TableTile } from "./tiles/table-tile";
+import { NoticeTile } from "./tiles/notice-tile";
 
 export type TileProps = {
   spec: never;
@@ -20,9 +23,12 @@ export type TileProps = {
  */
 const RENDERERS = {
   verdict: VerdictTile,
+  kpi: KpiTile,
   timeseries: TimeseriesTile,
   comparison: ComparisonTile,
   distribution: DistributionTile,
+  table: TableTile,
+  notice: NoticeTile,
   disambiguation: DisambiguationTile,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } satisfies Record<ViewSpecKind, ComponentType<any>>;

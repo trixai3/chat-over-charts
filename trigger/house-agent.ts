@@ -2,7 +2,7 @@ import { chat } from "@trigger.dev/sdk/ai";
 import { streamText, stepCountIs, type LanguageModel } from "ai";
 import { z } from "zod";
 import { getModel } from "../src/shared/model";
-import { compareAreas, emitVerdict } from "../src/agent/tools";
+import { analysisTools } from "../src/agent/tools";
 
 /**
  * The chat agent. In Trigger.dev's model this single task IS the backend — each
@@ -27,13 +27,16 @@ type ClientData = { model?: LanguageModel };
 // Declared once here, read back typed off the run() payload. Declaring on the
 // config (not just streamText) is what makes each tool's toModelOutput survive
 // history re-conversion from turn 2 onward (AGENTS.md invariant 3).
-const tools = { compareAreas, emitVerdict };
+const tools = analysisTools;
 
 const SYSTEM_PROMPT = [
-  "You answer questions about UK house prices.",
+  "You turn analytical questions into governed figures.",
   "You never write prose. The user sees tiles, not chat text.",
-  "Your only way to respond is by calling tools. Always finish a turn by",
-  "calling emitVerdict exactly once with your conclusion.",
+  "Never write SQL, table names, joins, or ViewSpecs.",
+  "For each request call inspectAnalysis first using semantic terms from the question.",
+  "If it reports NEEDS_CLARIFICATION, call requestClarification with its supported options.",
+  "If it reports READY, call renderAnalysis using the exact resolved semantic IDs.",
+  "After a figure renders, finish by calling emitVerdict exactly once.",
 ].join(" ");
 
 export const houseAgent = chat

@@ -22,11 +22,11 @@ export function ComparisonTile({
   const max = Math.max(...spec.rows.map((r) => r.value));
 
   return (
-    <TileFrame title={spec.title} stats={spec.stats}>
+    <TileFrame title={spec.title} stats={spec.stats} explanation={spec.explanation}>
       <div className="flex flex-col gap-2">
         <div className="flex justify-between font-mono text-[11px] text-black/35 dark:text-white/35">
           <span>{spec.metricLabel}</span>
-          <span>vs 5y</span>
+          <span>{spec.comparisonLabel ?? ""}</span>
         </div>
 
         {spec.rows.map((row) => {
@@ -51,7 +51,7 @@ export function ComparisonTile({
               </span>
 
               <span className="text-right font-mono text-xs tabular-nums">
-                {formatValue(row.value, spec.unit)}
+                {formatValue(row.value, spec.format)}
               </span>
 
               <span

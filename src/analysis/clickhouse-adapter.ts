@@ -1,0 +1,191 @@
+import type { ClickHouseClient } from "@clickhouse/client";
+import { getClickHouse } from "../shared/clickhouse";
+import type {
+  AnalysisFilter,
+  CompiledQuery,
+  ResolvedAnalysisRequest,
+  SemanticDimension,
+  SemanticModel,
+  SourceAdapter,
+} from "./types";
+
+const MAX_RESULT_ROWS = 1000;
+
+function normalizedValue(value: unknown, dimension: SemanticDimension): unknown {
+  if (typeof value === "string") {
+    if (dimension.valueNormalization === "uppercase") return value.toUpperCase();
+    if (dimension.valueNormalization === "lowercase") return value.toLowerCase();
+  }
+  if (Array.isArray(value)) return value.map((item) => normalizedValue(item, dimension));
+  return value;
+}
+
+function parameterType(dimension: SemanticDimension): string {
+  return dimension.kind === "time" ? "Date" : "String";
+}
+
+function compileFilter(
+  filter: AnalysisFilter,
+  dimension: SemanticDimension,
+  index: number,
+  params: Record<string, unknown>,
+): string {
+  const key = `filter_${index}`;
+  const expression = dimension.expression;
+  const type = parameterType(dimension);
+  const value = normalizedValue(filter.value, dimension);
+
+  switch (filter.operator) {
+    case "equals":
+      if (Array.isArray(value)) throw new Error(`${filter.field} equals requires one value.`);
+      params[key] = value;
+      return `${expression} = {${key}:${type}}`;
+    case "in":
+      if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(`${filter.field} in requires at least one value.`);
+      }
+      params[key] = value;
+      return `${expression} IN {${key}:Array(${type})}`;
+    case "between": {
+      if (!Array.isArray(value) || value.length !== 2) {
+        throw new Error(`${filter.field} between requires exactly two values.`);
+      }
+      params[`${key}_from`] = value[0];
+      params[`${key}_to`] = value[1];
+      return `${expression} >= {${key}_from:${type}} AND ${expression} <= {${key}_to:${type}}`;
+    }
+    case "gte":
+      if (Array.isArray(value)) throw new Error(`${filter.field} gte requires one value.`);
+      params[key] = value;
+      return `${expression} >= {${key}:${type}}`;
+    case "lte":
+      if (Array.isArray(value)) throw new Error(`${filter.field} lte requires one value.`);
+      params[key] = value;
+      return `${expression} <= {${key}:${type}}`;
+  }
+}
+
+function resultLimit(request: ResolvedAnalysisRequest): number {
+  if (request.limit !== undefined) return Math.min(Math.max(request.limit, 1), MAX_RESULT_ROWS);
+  switch (request.analysisType) {
+    case "single_value":
+      return 1;
+    case "category_comparison":
+      // Forty may render; the extra row is a sentinel proving that scope is too broad.
+      return 41;
+    case "detail":
+      // One extra sentinel row proves that the default table scope is too broad.
+      return 101;
+    case "trend":
+      return MAX_RESULT_ROWS;
+  }
+}
+
+export function compileClickHouseQuery(
+  request: ResolvedAnalysisRequest,
+  model: SemanticModel,
+): CompiledQuery {
+  const params: Record<string, unknown> = {
+    database: process.env.CLICKHOUSE_DATABASE ?? model.database,
+    table: model.table,
+  };
+  const dimensionAliases = request.dimensions.map((field) => field.field);
+  const measureAliases = request.measures;
+
+  const dimensions = request.dimensions.map((field) => {
+    const dimension = model.dimensions[field.field];
+    if (!dimension) throw new Error(`Unknown governed dimension: ${field.field}`);
+    const expression = field.grain ? dimension.grains?.[field.grain] : dimension.expression;
+    if (!expression) throw new Error(`${dimension.label} does not support grain ${field.grain}.`);
+    return `${expression} AS ${field.field}`;
+  });
+  const measures = request.measures.map((id) => {
+    const measure = model.measures[id];
+    if (!measure) throw new Error(`Unknown governed measure: ${id}`);
+    return `${measure.expression} AS ${id}`;
+  });
+
+  const filters = request.filters.map((filter, index) => {
+    const dimension = model.dimensions[filter.field];
+    if (!dimension) throw new Error(`Unknown governed filter dimension: ${filter.field}`);
+    return compileFilter(filter, dimension, index, params);
+  });
+
+  const selectedAliases = new Set([...dimensionAliases, ...measureAliases]);
+  const requestedOrder = request.orderBy.map((order) => {
+    if (!selectedAliases.has(order.field)) {
+      throw new Error(`Sort field ${order.field} must be selected by the semantic query.`);
+    }
+    return `${order.field} ${order.direction.toUpperCase()}`;
+  });
+  const defaultOrder =
+    request.analysisType === "trend" && dimensionAliases.length > 0
+      ? [`${dimensionAliases[0]} ASC`]
+      : request.analysisType === "category_comparison" && measureAliases.length > 0
+        ? [`${measureAliases[measureAliases.length - 1]} DESC`]
+        : [];
+
+  const limit = resultLimit(request);
+  const sql = [
+    `SELECT\n  ${[...dimensions, ...measures].join(",\n  ")}`,
+    "FROM {database:Identifier}.{table:Identifier}",
+    filters.length > 0 ? `WHERE ${filters.join("\n  AND ")}` : "",
+    dimensions.length > 0 && measures.length > 0
+      ? `GROUP BY ${dimensionAliases.join(", ")}`
+      : "",
+    requestedOrder.length > 0 || defaultOrder.length > 0
+      ? `ORDER BY ${(requestedOrder.length > 0 ? requestedOrder : defaultOrder).join(", ")}`
+      : "",
+    `LIMIT ${limit}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    sql,
+    params,
+    request,
+    dimensionAliases,
+    measureAliases,
+    resultLimit: limit,
+  };
+}
+
+function parseSummary(header: unknown) {
+  try {
+    return JSON.parse(String(header ?? "{}")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+export class ClickHouseAdapter implements SourceAdapter {
+  constructor(private readonly client: ClickHouseClient = getClickHouse()) {}
+
+  async execute(query: CompiledQuery) {
+    const result = await this.client.query({
+      query: query.sql,
+      query_params: query.params,
+      format: "JSONEachRow",
+      clickhouse_settings: {
+        max_execution_time: 30,
+        timeout_before_checking_execution_speed: 0,
+        max_rows_to_read: "1000000000",
+        max_bytes_to_read: "100000000000",
+        max_result_rows: String(query.resultLimit),
+        result_overflow_mode: "break",
+      },
+    });
+    const rows = await result.json<Record<string, unknown>>();
+    const summary = parseSummary(result.response_headers?.["x-clickhouse-summary"]);
+    return {
+      rows,
+      stats: {
+        rowsRead: Number(summary.read_rows ?? 0),
+        bytesRead: Number(summary.read_bytes ?? 0),
+        elapsedMs: Math.round(Number(summary.elapsed_ns ?? 0) / 1e6),
+        queryId: result.query_id,
+      },
+    };
+  }
+}

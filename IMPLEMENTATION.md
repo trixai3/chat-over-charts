@@ -1,5 +1,9 @@
 # 实现计划 —— 完整清单与进度
 
+> **Figure generator redesign (19 Jul):** the generic semantic-query, chart-policy,
+> validation, explanation, and clarification implementation is documented in
+> [`FIGURE_GENERATOR_IMPLEMENTATION.md`](FIGURE_GENERATOR_IMPLEMENTATION.md).
+
 > **这份文档是"做什么、做到哪了"的单一真相源。**
 > `PLAN.md` 记录*为什么*这么设计;这里记录*进度*。
 > 状态核对于 2026-07-18(Day 2 进行中),对着文件系统和 ClickHouse 实测,不是凭记忆。

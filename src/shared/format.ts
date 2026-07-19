@@ -1,26 +1,24 @@
-import type { Unit } from "./view-spec";
+import type { ValueFormat } from "./view-spec";
 
-const gbp = new Intl.NumberFormat("en-GB", {
-  style: "currency",
-  currency: "GBP",
-  maximumFractionDigits: 0,
-});
-const count = new Intl.NumberFormat("en-GB");
-
-export function formatValue(v: number, unit: Unit): string {
-  switch (unit) {
-    case "gbp":
-      return gbp.format(v);
-    case "count":
-      return count.format(v);
-    case "pct":
-      return `${v.toFixed(1)}%`;
+export function formatValue(value: number, format: ValueFormat): string {
+  switch (format.style) {
+    case "currency":
+      return new Intl.NumberFormat("en-GB", {
+        style: "currency",
+        currency: format.currency,
+        maximumFractionDigits: 0,
+      }).format(value);
+    case "number":
+      return new Intl.NumberFormat("en-GB", {
+        maximumFractionDigits: format.maximumFractionDigits,
+      }).format(value);
+    case "percent":
+      return `${value.toFixed(format.maximumFractionDigits)}%`;
   }
 }
 
-/** Deltas always carry an explicit sign — "+18%" and "18%" read differently. */
-export function formatDelta(v: number): string {
-  return `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+export function formatDelta(value: number): string {
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
 export function formatStats(rowsRead: number, elapsedMs: number): string {

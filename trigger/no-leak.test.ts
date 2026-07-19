@@ -1,4 +1,3 @@
-// Harness first — installs the resource catalog the agent registers into.
 import { mockChatAgent } from "@trigger.dev/sdk/ai/test";
 
 import { describe, expect, it } from "vitest";
@@ -9,35 +8,30 @@ import type { ClickHouseClient } from "@clickhouse/client";
 import { houseAgent } from "./house-agent";
 import { clickhouseKey } from "../src/shared/clickhouse";
 
-/**
- * The must-pass test (AGENTS.md invariant 3). A tool's `toModelOutput` compresses
- * its result before it re-enters the model's prompt. The failure mode is subtle:
- * it works on turn 1 (streamText applies it live) but, if tools aren't declared
- * on the agent config, is SKIPPED when history is re-converted from turn 2 on —
- * the raw ComparisonSpec JSON gets stringified back into the prompt, bloating
- * context and the cache prefix. Invisible with one question; fatal on camera.
- *
- * We declared tools on the config, so this asserts the fix holds: across three
- * turns, no model prompt ever contains raw spec field names — only the one-line
- * summary. Runs fully offline: a fake ClickHouse client via setupLocals, a
- * scripted mock model.
- */
+const request = {
+  question: "Which London borough rose fastest?",
+  sourceId: "uk-house-prices",
+  analysisType: "category_comparison",
+  measures: ["latest median price", "five year growth"],
+  dimensions: [{ field: "borough" }],
+  filters: [{ field: "county", operator: "equals", value: "Greater London" }],
+  orderBy: [{ field: "five year growth", direction: "desc" }],
+};
 
-// A fake ClickHouse client — same shape the tool uses (.query().json() +
-// response_headers), returning the real numbers we verified in the playground.
 const fakeClickHouse = {
   query: async () => ({
     json: async () => [
-      { district: "BARKING AND DAGENHAM", latest_median: 380000, base_median: 325085, n: 73710 },
-      { district: "HAVERING", latest_median: 440423, base_median: 389520, n: 122873 },
+      { district: "HAVERING", latest_median_price: 445500, five_year_price_change_pct: 17.9 },
+      { district: "LAMBETH", latest_median_price: 526890, five_year_price_change_pct: -7.2 },
     ],
+    query_id: "no-leak-uk",
     response_headers: {
-      "x-clickhouse-summary": JSON.stringify({ read_rows: "4030464", elapsed_ns: "355000000" }),
+      "x-clickhouse-summary": JSON.stringify({ read_rows: "4030464", elapsed_ns: "45000000" }),
     },
   }),
 } as unknown as ClickHouseClient;
 
-function finishPart(unified: "tool-calls" | "stop"): LanguageModelV3StreamPart {
+function finish(unified: "tool-calls" | "stop"): LanguageModelV3StreamPart {
   return {
     type: "finish",
     finishReason: { unified, raw: unified },
@@ -48,71 +42,58 @@ function finishPart(unified: "tool-calls" | "stop"): LanguageModelV3StreamPart {
   };
 }
 
-// input must be a JSON string, not an object (slice-1 gotcha, NOTES-day2 §5).
-function toolCall(id: string, name: string, input: unknown): LanguageModelV3StreamPart {
-  return { type: "tool-call", toolCallId: id, toolName: name, input: JSON.stringify(input) };
+function toolCall(id: string, toolName: string, input: unknown): LanguageModelV3StreamPart {
+  return { type: "tool-call", toolCallId: id, toolName, input: JSON.stringify(input) };
 }
 
-/** A model that plays a fixed script of steps, one per doStream call. */
 function scriptedModel(steps: LanguageModelV3StreamPart[][]) {
   let call = 0;
   return new MockLanguageModelV3({
-    doStream: async () => {
-      const chunks = steps[call++] ?? [finishPart("stop")];
-      return { stream: simulateReadableStream({ chunks }) };
-    },
+    doStream: async () => ({
+      stream: simulateReadableStream({ chunks: steps[call++] ?? [finish("stop")] }),
+    }),
   });
 }
 
-function userMsg(text: string, id: string) {
+function userMessage(text: string, id: string) {
   return { id, role: "user" as const, parts: [{ type: "text" as const, text }] };
 }
 
-describe("houseAgent multi-turn", () => {
-  it("never leaks a raw ViewSpec into the model prompt from turn 2 on", async () => {
+describe("cross-turn result compression", () => {
+  it("keeps plans, SQL, ViewSpecs, and rendering data out of later model prompts", async () => {
     const model = scriptedModel([
-      // Turn 1: query, then verdict, then stop.
-      [toolCall("c1", "compareAreas", { county: "Greater London" }), finishPart("tool-calls")],
-      [toolCall("v1", "emitVerdict", { headline: "Barking rose fastest", tone: "good" }), finishPart("tool-calls")],
-      [finishPart("stop")],
-      // Turn 2: just a verdict — its prompt carries turn 1's compareAreas result.
-      [toolCall("v2", "emitVerdict", { headline: "Still Barking", tone: "neutral" }), finishPart("tool-calls")],
-      [finishPart("stop")],
-      // Turn 3: another verdict — prompt carries both prior turns.
-      [toolCall("v3", "emitVerdict", { headline: "As before", tone: "neutral" }), finishPart("tool-calls")],
-      [finishPart("stop")],
+      [toolCall("i1", "inspectAnalysis", request), finish("tool-calls")],
+      [toolCall("r1", "renderAnalysis", request), finish("tool-calls")],
+      [toolCall("v1", "emitVerdict", { headline: "Havering leads", tone: "good" }), finish("tool-calls")],
+      [finish("stop")],
+      [toolCall("v2", "emitVerdict", { headline: "Still Havering", tone: "neutral" }), finish("tool-calls")],
+      [finish("stop")],
+      [toolCall("v3", "emitVerdict", { headline: "As before", tone: "neutral" }), finish("tool-calls")],
+      [finish("stop")],
     ]);
-
     const harness = mockChatAgent(houseAgent, {
-      chatId: "no-leak-1",
+      chatId: "no-leak-generic",
       clientData: { model },
       setupLocals: ({ set }) => set(clickhouseKey, fakeClickHouse),
     });
 
     try {
-      await harness.sendMessage(userMsg("Which London borough rose fastest?", "u1"));
-      const t2Start = model.doStreamCalls.length;
-      await harness.sendMessage(userMsg("And what stands out now?", "u2"));
-      const t3Start = model.doStreamCalls.length;
-      await harness.sendMessage(userMsg("Thanks!", "u3"));
+      await harness.sendMessage(userMessage(request.question, "u1"));
+      const turn2 = model.doStreamCalls.length;
+      await harness.sendMessage(userMessage("What is the conclusion?", "u2"));
+      const turn3 = model.doStreamCalls.length;
+      await harness.sendMessage(userMessage("And again?", "u3"));
 
-      // The core assertion: turn 2's first model call carries turn 1's history.
-      // The compareAreas result must be there COMPRESSED, not as raw spec JSON.
-      const t2Prompt = JSON.stringify(model.doStreamCalls[t2Start]!.prompt);
-      expect(t2Prompt).toContain("Scanned"); // the one-line summary IS present
-      expect(t2Prompt).not.toContain('"metricLabel"'); // ...and the raw spec is NOT
-      expect(t2Prompt).not.toContain('"drill"');
+      const prompt2 = JSON.stringify(model.doStreamCalls[turn2]!.prompt);
+      expect(prompt2).toContain("READY");
+      expect(prompt2).toContain("categories. First");
+      expect(prompt2).not.toContain('"generatedSql"');
+      expect(prompt2).not.toContain('"metricLabel"');
+      expect(prompt2).not.toContain("quantileTDigestIf");
 
-      // Same must hold on turn 3 (two prior turns of history).
-      const t3Prompt = JSON.stringify(model.doStreamCalls[t3Start]!.prompt);
-      expect(t3Prompt).not.toContain('"metricLabel"');
-
-      // Belt and braces: no prompt, any turn, ever carries the raw ComparisonSpec.
-      for (const c of model.doStreamCalls) {
-        const p = JSON.stringify(c.prompt);
-        expect(p).not.toContain('"kind":"comparison"');
-        expect(p).not.toContain('"metricLabel"');
-      }
+      const prompt3 = JSON.stringify(model.doStreamCalls[turn3]!.prompt);
+      expect(prompt3).not.toContain('"generatedSql"');
+      expect(prompt3).not.toContain('"explanation"');
     } finally {
       await harness.close();
     }
