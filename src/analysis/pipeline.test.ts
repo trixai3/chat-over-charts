@@ -70,6 +70,40 @@ describe("governed figure pipeline with UK house-price data", () => {
     }
   });
 
+  it("sorts each series chronologically even when SQL rows arrive value-ordered", async () => {
+    const plan = planAnalysis({
+      question: "How did prices change per year in top districts?",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["median price"],
+      dimensions: [{ field: "year", grain: "year" }, { field: "district" }],
+      filters: [{ field: "county", operator: "equals", value: "Greater London" }],
+      // The model legitimately orders "top districts" by value; the line must
+      // still be drawn in time order or the path doubles back on itself.
+      orderBy: [{ field: "median price", direction: "desc" }],
+      seriesSelection: { method: "top", n: 3, by: "transactions" },
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    const adapter: SourceAdapter = {
+      execute: async () => ({
+        rows: [
+          { sale_date: "2025-01-01", district: "LAMBETH", median_price: 526890 },
+          { sale_date: "2023-01-01", district: "LAMBETH", median_price: 531000 },
+          { sale_date: "2024-01-01", district: "LAMBETH", median_price: 535000 },
+        ],
+        stats,
+      }),
+    };
+    const result = await runAnalysis(plan, adapter);
+    expect(result.spec.kind).toBe("timeseries");
+    if (result.spec.kind !== "timeseries") return;
+    expect(result.spec.series[0].points.map((point) => point.t)).toEqual([
+      "2023-01-01",
+      "2024-01-01",
+      "2025-01-01",
+    ]);
+  });
+
   it("refuses duplicate grain instead of rendering misleading data", async () => {
     const plan = planAnalysis({
       question: "Median price by district",

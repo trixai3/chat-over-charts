@@ -180,6 +180,13 @@ export function compileClickHouseQuery(
   // governed table and WHERE filters, but histogram(20) replaces GROUP BY.
   // ClickHouse's histogram(20)(expr) returns Array(Tuple(Float64, Float64,
   // Float64)) = [lower, upper, height] per bin, one row for the whole population.
+  //
+  // Binning is clipped to the middle 99% (P0.5–P99.5, computed as a scalar CTE
+  // over the same filtered population): prices carry extreme outliers (a £793M
+  // portfolio deal in Greater London), and an unclipped histogram stretches its
+  // axis to the record sale, collapsing every real sale into the first bar.
+  // The clipped tail is counted and reported, never hidden; the median stays
+  // full-population.
   if (request.analysisType === "distribution") {
     const measureId = request.measures[0];
     const measure = model.measures[measureId];
@@ -188,10 +195,14 @@ export function compileClickHouseQuery(
       throw new Error(`${measure.label} has no per-row value to bin.`);
     }
     const limit = resultLimit(request);
+    const value = measure.valueExpression;
+    const where = filters.length > 0 ? `WHERE ${filters.join("\n  AND ")}` : "";
+    const inBounds = `${value} BETWEEN bin_bounds[1] AND bin_bounds[2]`;
     const sql = [
-      `SELECT\n  histogram(20)(${measure.valueExpression}) AS bins,\n  ${measure.expression} AS ${measureId}`,
+      `WITH (\n  SELECT quantilesTDigest(0.005, 0.995)(${value})\n  FROM {database:Identifier}.{table:Identifier}${where ? `\n  ${where}` : ""}\n) AS bin_bounds`,
+      `SELECT\n  histogramIf(20)(${value}, ${inBounds}) AS bins,\n  ${measure.expression} AS ${measureId},\n  countIf(NOT (${inBounds})) AS clipped_count`,
       "FROM {database:Identifier}.{table:Identifier}",
-      filters.length > 0 ? `WHERE ${filters.join("\n  AND ")}` : "",
+      where,
       `LIMIT ${limit}`,
     ]
       .filter(Boolean)

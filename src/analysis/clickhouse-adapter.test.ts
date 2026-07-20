@@ -126,7 +126,11 @@ describe("ClickHouse semantic compiler", () => {
     if (plan.status !== "ready") throw new Error("Expected a ready plan");
     const query = compileClickHouseQuery(plan.request, getSemanticModel(plan.request.sourceId)!);
 
-    expect(query.sql).toContain("histogram(20)(price)");
+    // Binning is clipped to P0.5–P99.5 so one record sale can't flatten the
+    // histogram; the clipped tail is counted, and the median stays unclipped.
+    expect(query.sql).toContain("quantilesTDigest(0.005, 0.995)(price)");
+    expect(query.sql).toContain("histogramIf(20)(price, price BETWEEN bin_bounds[1] AND bin_bounds[2])");
+    expect(query.sql).toContain("countIf(NOT (price BETWEEN bin_bounds[1] AND bin_bounds[2])) AS clipped_count");
     expect(query.sql).not.toContain("GROUP BY");
     expect(query.sql).toContain("LIMIT 1");
     expect(query.params.filter_0).toBe("GREATER LONDON");

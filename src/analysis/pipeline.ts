@@ -228,7 +228,13 @@ function buildTimeseries(
     kind: "timeseries",
     title: title(plan, model),
     format: displayFormat(measure, plan),
-    series: [...grouped.entries()].map(([label, points]) => ({ label, points })),
+    // Points sort chronologically here, not in SQL: the model may legitimately
+    // order rows by value ("top districts"), and a line drawn in value order
+    // doubles back on itself. ISO date strings make lexicographic = temporal.
+    series: [...grouped.entries()].map(([label, points]) => ({
+      label,
+      points: [...points].sort((a, b) => a.t.localeCompare(b.t)),
+    })),
     drillTargets: [],
     stats,
     explanation: manifest,
@@ -411,6 +417,20 @@ function buildDistribution(
   const medianRaw = rows[0]?.[measure.id];
   const median =
     isMedianMeasure && medianRaw !== undefined ? numberValue(medianRaw, measure.id) : undefined;
+  // The query clips binning to P0.5–P99.5 so outliers can't flatten the shape;
+  // the count of clipped sales is disclosed rather than silently dropped.
+  const clippedRaw = rows[0]?.clipped_count;
+  const clipped = clippedRaw === undefined ? 0 : numberValue(clippedRaw, "clipped_count");
+  const explanation =
+    clipped > 0
+      ? {
+          ...manifest,
+          limitations: [
+            ...manifest.limitations,
+            `The histogram covers the middle 99% of sales; ${clipped.toLocaleString("en-GB")} extreme outlier${clipped === 1 ? "" : "s"} fall outside its range (the median includes them).`,
+          ],
+        }
+      : manifest;
   return {
     kind: "distribution",
     title: title(plan, model),
@@ -418,7 +438,7 @@ function buildDistribution(
     bins,
     median,
     stats,
-    explanation: manifest,
+    explanation,
   };
 }
 

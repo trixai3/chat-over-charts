@@ -260,7 +260,7 @@ describe("chart kinds and the hybrid resolver", () => {
       expect(spec.bins).toHaveLength(3);
       expect(spec.median).toBe(526890);
 
-      expect(queries.some((sql) => sql.includes("histogram("))).toBe(true);
+      expect(queries.some((sql) => sql.includes("histogramIf(20)("))).toBe(true);
     } finally {
       await harness.close();
     }

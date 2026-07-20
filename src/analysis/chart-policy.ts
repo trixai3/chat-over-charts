@@ -8,6 +8,12 @@ import type {
 export const CHART_POLICY_VERSION = "1.0.0";
 export const MAX_COMPARISON_CATEGORIES = 40;
 export const MAX_LINE_SERIES = 8;
+/**
+ * The *recommended* series count, below the hard cap: past ~5 converging
+ * lines a chart stops being readable even when it's still legal. The
+ * clarification recommends this and offers the cap as an explicit choice.
+ */
+export const DEFAULT_LINE_SERIES = 5;
 
 type Selection =
   | { status: "selected"; kind: FigureKind; reason: string }
