@@ -116,6 +116,15 @@ function activityLabel(parts: readonly unknown[]): string {
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const part = parts[index] as { type?: unknown; state?: unknown } | null;
     if (typeof part?.type !== "string") continue;
+    // Reasoning streams before every tool choice and can run for many seconds.
+    // Naming it separates "the model is thinking" from "the stream stalled" —
+    // two states that look identical without this label and have twice been
+    // misdiagnosed as hangs.
+    if (part.type === "reasoning") {
+      return part.state === "streaming"
+        ? "Model thinking…"
+        : "Thinking done · deciding next step…";
+    }
     const step = ACTIVITY_STEPS[part.type];
     if (!step) continue;
     return part.state === "output-available" ? step.done : step.active;
