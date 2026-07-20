@@ -32,6 +32,31 @@ describe("ClickHouse semantic compiler", () => {
     expect(query.params.filter_0).toBe("GREATER LONDON");
   });
 
+  it("compiles a measure threshold as HAVING over the aggregate, parameterized", () => {
+    const plan = planAnalysis({
+      question: "Which London boroughs have a median over 500k?",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["median price"],
+      dimensions: [{ field: "borough" }],
+      filters: [
+        { field: "county", operator: "equals", value: "Greater London" },
+        { field: "median price", operator: "gte", value: 500000 },
+      ],
+      orderBy: [],
+    });
+    if (plan.status !== "ready") throw new Error("Expected a ready plan");
+    const query = compileClickHouseQuery(plan.request, getSemanticModel(plan.request.sourceId)!);
+
+    // The threshold thresholds aggregates, so it must sit in HAVING (after
+    // GROUP BY), while the county scope stays in WHERE — and the value still
+    // travels as a parameter, never in the SQL text.
+    expect(query.sql).toContain("WHERE county = {filter_0:String}");
+    expect(query.sql).toMatch(/GROUP BY district\nHAVING round\(quantileTDigest\(0\.5\)\(price\)\) >= \{having_1:Float64\}/);
+    expect(query.sql).not.toContain("500000");
+    expect(query.params.having_1).toBe(500000);
+  });
+
   it("keeps hostile filter text out of SQL to prevent SQL injection", () => {
     const plan = londonComparisonPlan();
     plan.request.filters[0].value = "Greater London' OR 1=1 --";

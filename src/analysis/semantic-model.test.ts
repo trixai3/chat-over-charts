@@ -352,6 +352,84 @@ describe("semantic planning", () => {
   });
 });
 
+describe("measure threshold filters (HAVING semantics)", () => {
+  const base = {
+    question: "Which districts have a median over 500k?",
+    sourceId: "uk-house-prices",
+    analysisType: "category_comparison" as const,
+    measures: ["median price"],
+    dimensions: [{ field: "district" }],
+    orderBy: [],
+  };
+
+  it("resolves a threshold on a measure synonym into a governed measure filter", () => {
+    const plan = planAnalysis({
+      ...base,
+      filters: [{ field: "median price", operator: "gte", value: 500000 }],
+    });
+    expect(plan.status).toBe("ready");
+    if (plan.status !== "ready") return;
+    expect(plan.request.filters).toEqual([
+      { field: "median_price", operator: "gte", value: 500000 },
+    ]);
+  });
+
+  it("coerces numeric strings and refuses non-numeric thresholds", () => {
+    const ok = planAnalysis({
+      ...base,
+      filters: [{ field: "median price", operator: "gte", value: "500000" }],
+    });
+    expect(ok.status).toBe("ready");
+    if (ok.status === "ready") {
+      expect(ok.request.filters[0]).toEqual({ field: "median_price", operator: "gte", value: 500000 });
+    }
+
+    const bad = planAnalysis({
+      ...base,
+      filters: [{ field: "median price", operator: "gte", value: "expensive" }],
+    });
+    expect(bad.status).toBe("unsupported");
+    if (bad.status === "unsupported") expect(bad.reason).toContain("numeric");
+  });
+
+  it("refuses equals/in on a measure — thresholds only", () => {
+    const plan = planAnalysis({
+      ...base,
+      filters: [{ field: "median price", operator: "equals", value: 500000 }],
+    });
+    expect(plan.status).toBe("unsupported");
+    if (plan.status !== "unsupported") return;
+    expect(plan.reason).toContain("gte, lte, or between");
+  });
+
+  it("refuses a measure threshold combined with a previous-period comparison", () => {
+    const plan = planAnalysis({
+      ...base,
+      question: "Districts where price growth is over 5%?",
+      analysisType: "trend",
+      dimensions: [{ field: "year", grain: "year" }],
+      comparison: "vs_previous_period",
+      filters: [{ field: "median price", operator: "gte", value: 500000 }],
+    });
+    expect(plan.status).toBe("unsupported");
+    if (plan.status !== "unsupported") return;
+    expect(plan.reason).toContain("previous-period");
+  });
+
+  it("refuses a measure threshold on a distribution", () => {
+    const plan = planAnalysis({
+      ...base,
+      question: "Distribution of prices over 500k?",
+      analysisType: "distribution",
+      dimensions: [],
+      filters: [{ field: "median price", operator: "gte", value: 500000 }],
+    });
+    expect(plan.status).toBe("unsupported");
+    if (plan.status !== "unsupported") return;
+    expect(plan.reason).toContain("distribution");
+  });
+});
+
 describe("describeDataSource", () => {
   it("renders the full catalog as a table tile without running SQL", () => {
     const spec = describeDataSource("uk-house-prices");

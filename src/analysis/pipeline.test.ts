@@ -314,6 +314,51 @@ describe("governed figure pipeline with UK house-price data", () => {
     expect(summary).toContain("Slices: terraced 50.0%; flat 30.0%; detached 20.0%.");
   });
 
+  it("carries a measure threshold into the explanation scope so the verdict can cite it", async () => {
+    const plan = planAnalysis({
+      question: "Which London boroughs have a median over 500k?",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["median price"],
+      dimensions: [{ field: "borough" }],
+      filters: [
+        { field: "county", operator: "equals", value: "Greater London" },
+        { field: "median price", operator: "gte", value: 500000 },
+      ],
+      orderBy: [],
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    const adapter: SourceAdapter = {
+      execute: async () => ({
+        rows: [
+          { district: "WANDSWORTH", median_price: 630000 },
+          { district: "LAMBETH", median_price: 526890 },
+        ],
+        stats,
+      }),
+    };
+    const result = await runAnalysis(plan, adapter);
+    expect(result.spec.kind).toBe("comparison");
+    const summary = summarizeSpec(result.spec);
+    expect(summary).toContain("Median sale price gte 500000");
+  });
+
+  it("returns a governed notice when a threshold filters out every group", async () => {
+    const plan = planAnalysis({
+      question: "Which districts have a median over 90 million?",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["median price"],
+      dimensions: [{ field: "district" }],
+      filters: [{ field: "median price", operator: "gte", value: 90000000 }],
+      orderBy: [],
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    const adapter: SourceAdapter = { execute: async () => ({ rows: [], stats }) };
+    const result = await runAnalysis(plan, adapter);
+    expect(result.spec).toMatchObject({ kind: "notice", title: "No rows match this scope" });
+  });
+
   it("summarizeSpec previews the first table rows", async () => {
     const plan = planAnalysis({
       question: "List boroughs with prices and volumes",

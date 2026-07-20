@@ -35,11 +35,31 @@ describe.skipIf(!hasCredentials)("live UK House Price Paid integration", () => {
   // snapshot grouped by year (a single line of zeros). It must now produce a
   // top-N multi-series per-period change over the confirmed scope.
   it("renders per-district price change over time with a confirmed top-N scope", async () => {
-    const plan = planAnalysis({
+    // "average price change" first trips the average guard (d1ff764): the
+    // governed aggregate is a median, so the swap needs user confirmation.
+    const guarded = planAnalysis({
       question: "show me average price change per district in london over time",
       sourceId: "uk-house-prices",
       analysisType: "trend",
       measures: ["price change"],
+      dimensions: [{ field: "sale_date", grain: "year" }, { field: "district" }],
+      filters: [{ field: "county", operator: "equals", value: "Greater London" }],
+      orderBy: [],
+      seriesSelection: { method: "top", n: 8 },
+    });
+    if (guarded.status !== "needs_clarification") {
+      throw new Error(`Expected the average guard, got: ${guarded.status}`);
+    }
+    expect(guarded.ambiguities[0]?.recommended).toBe("median_price");
+
+    // The confirmed re-draft: verbatim governed id plus the change comparison,
+    // exactly what the clarification option instructs the model to send.
+    const plan = planAnalysis({
+      question: "show me average price change per district in london over time",
+      sourceId: "uk-house-prices",
+      analysisType: "trend",
+      measures: ["median_price"],
+      comparison: "vs_previous_period",
       dimensions: [{ field: "sale_date", grain: "year" }, { field: "district" }],
       filters: [{ field: "county", operator: "equals", value: "Greater London" }],
       orderBy: [],
@@ -78,6 +98,32 @@ describe.skipIf(!hasCredentials)("live UK House Price Paid integration", () => {
     expect(result.spec.bins.length).toBeGreaterThan(0);
     expect(result.spec.median).toBeGreaterThan(0);
     expect(result.spec.stats.rowsRead).toBeGreaterThan(0);
+  }, 30_000);
+
+  // Improvement plan ④: a measure threshold compiles to HAVING. Proven live
+  // because a stubbed adapter cannot catch ClickHouse dialect drift.
+  it("filters boroughs by a median threshold via HAVING", async () => {
+    const plan = planAnalysis({
+      question: "Which London boroughs have a median over 500k?",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["median price"],
+      dimensions: [{ field: "borough" }],
+      filters: [
+        { field: "county", operator: "equals", value: "Greater London" },
+        { field: "median price", operator: "gte", value: 500000 },
+      ],
+      orderBy: [{ field: "median price", direction: "desc" }],
+    });
+    if (plan.status !== "ready") throw new Error(`Plan was not ready: ${plan.status}`);
+
+    const result = await runAnalysis(plan);
+    expect(result.spec.kind).toBe("comparison");
+    if (result.spec.kind !== "comparison") return;
+    expect(result.spec.rows.length).toBeGreaterThan(0);
+    // The threshold is the whole point: every surviving borough median is ≥ it.
+    expect(result.spec.rows.every((row) => row.value >= 500000)).toBe(true);
+    expect(result.spec.explanation.scope).toContain("Median sale price gte 500000");
   }, 30_000);
 
   it("compares transactions by property type as a pie-compatible figure", async () => {

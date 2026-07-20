@@ -46,7 +46,9 @@ export const analysisDraftSchema = z.object({
           .string()
           .describe(
             "Best-guess field. For place names any guess is fine — values are resolved " +
-              "against governed reference data, so never ask the user which field a place is.",
+              "against governed reference data, so never ask the user which field a place is. " +
+              "A governed measure is also valid here for threshold questions ('districts where " +
+              "the median is over X') with operator gte, lte, or between.",
           ),
         operator: z.enum(["equals", "in", "between", "gte", "lte"]),
         value: filterValue,
@@ -193,9 +195,10 @@ export const renderAnalysis = tool({
  */
 export const explainSemantics = tool({
   description:
-    "Explain how a governed measure or dimension is defined and calculated, using only the semantic layer. " +
-    "Use when the user asks how a value was calculated or what a term means. Never runs a query. " +
-    "Do not use for questions unrelated to the connected data.",
+    "Explain how a governed measure or dimension is defined and calculated, or answer questions " +
+    "about the dataset itself (source, freshness, coverage, why an aggregation was chosen), using " +
+    "only the semantic layer. Use when the user asks how a value was calculated or what a term " +
+    "means. Never runs a query. Do not use for questions unrelated to the connected data.",
   inputSchema: z.object({
     sourceId: z.string().default("uk-house-prices"),
     term: z.string().describe("The measure or dimension the user asked about, in their words."),

@@ -116,7 +116,10 @@ function explanation(
   const measures = plan.request.measures.map((id) => model.measures[id]);
   const dimensions = plan.request.dimensions.map((field) => model.dimensions[field.field]);
   const scope = plan.request.filters.map((filter) => {
-    const label = model.dimensions[filter.field]?.label ?? filter.field;
+    const label =
+      model.dimensions[filter.field]?.label ??
+      model.measures[filter.field]?.label ??
+      filter.field;
     const value = Array.isArray(filter.value) ? filter.value.join(" – ") : String(filter.value);
     return `${label} ${filter.operator.replaceAll("_", " ")} ${value}`;
   });
@@ -477,6 +480,19 @@ export async function runAnalysis(
         tone: "error",
         suggestions: validationIssues.slice(1),
       },
+      profile: datasetProfile,
+      query,
+    };
+  }
+  // A legitimate empty result (a threshold no group meets, a window with no
+  // sales) must end as a governed notice, not a builder crash on rows[0].
+  if (execution.rows.length === 0) {
+    return {
+      spec: notice(
+        "No rows match this scope",
+        "The query ran, but no data satisfies the requested filters and thresholds.",
+        ["Loosen the threshold", "Broaden the filters or date window"],
+      ),
       profile: datasetProfile,
       query,
     };

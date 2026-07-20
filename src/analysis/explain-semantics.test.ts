@@ -35,4 +35,21 @@ describe("explainSemanticTerm", () => {
     expect(spec.tone).toBe("warning");
     expect(spec.suggestions).toContain("Median sale price");
   });
+
+  // Improvement plan ⑤: dataset-level questions travel the same channel.
+  it("answers dataset-level questions from the registry", () => {
+    const spec = explainSemanticTerm("uk-house-prices", "where does the data come from");
+    expect(spec).toMatchObject({ kind: "notice", tone: "neutral" });
+    if (spec.kind !== "notice") return;
+    expect(spec.title).toContain("About");
+    expect(spec.message).toContain("HM Land Registry");
+    expect(spec.message).toContain("Last refresh: 2026-05-29");
+    expect(spec.message).toContain("≈31 million rows");
+  });
+
+  it("explains why the median is used via the measure's aggregationNote", () => {
+    const spec = explainSemanticTerm("uk-house-prices", "median price");
+    if (spec.kind !== "notice") throw new Error("expected notice");
+    expect(spec.message).toContain("right-skewed");
+  });
 });

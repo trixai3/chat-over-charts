@@ -44,6 +44,10 @@ const RECENCY_WORDS = /\b(latest|current|recent|newest|now|nowadays|today)\b/gi;
 /** Words that claim a mean — the aggregation this source deliberately avoids for skewed measures. */
 const AVERAGE_WORDS = /\b(average|avg|mean)\b/i;
 
+/** Terms that ask about the dataset itself rather than one measure/dimension. */
+const DATASET_WORDS =
+  /\b(data|dataset|source|sources|provenance|refresh(?:ed)?|updated?|updates?|coverage|reliab\w*|history)\b/i;
+
 export function stripRecencyWords(term: string): string {
   return term.replace(RECENCY_WORDS, " ").replace(/\s+/g, " ").trim();
 }
@@ -224,7 +228,45 @@ type FilterResolution =
   | { status: "ok"; filter: AnalysisFilter }
   | { status: "unknown_field" }
   | { status: "ambiguous_value"; term: string; candidates: ValueCandidate[] }
-  | { status: "unknown_value"; term: string; dimension: SemanticDimension };
+  | { status: "unknown_value"; term: string; dimension: SemanticDimension }
+  | { status: "invalid_measure_filter"; measure: SemanticMeasure; reason: string };
+
+/**
+ * Improvement plan ④: a filter can target a governed measure — "districts
+ * where the median is over 500k" — which compiles to HAVING. Only numeric
+ * thresholds make sense on an aggregate, so the operators are restricted and
+ * the values must be numbers; everything else is refused with the reason.
+ */
+function resolveMeasureFilter(
+  filter: AnalysisFilter,
+  measure: SemanticMeasure,
+): FilterResolution {
+  if (filter.operator === "equals" || filter.operator === "in") {
+    return {
+      status: "invalid_measure_filter",
+      measure,
+      reason: `A threshold on “${measure.label}” supports gte, lte, or between — not ${filter.operator}.`,
+    };
+  }
+  const raw = Array.isArray(filter.value) ? filter.value : [filter.value];
+  const expected = filter.operator === "between" ? 2 : 1;
+  const numbers = raw.map(Number);
+  if (raw.length !== expected || numbers.some((value) => !Number.isFinite(value))) {
+    return {
+      status: "invalid_measure_filter",
+      measure,
+      reason: `A ${filter.operator} threshold on “${measure.label}” needs ${expected} numeric value${expected > 1 ? "s" : ""}.`,
+    };
+  }
+  return {
+    status: "ok",
+    filter: {
+      field: measure.id,
+      operator: filter.operator,
+      value: filter.operator === "between" ? numbers : numbers[0],
+    },
+  };
+}
 
 /**
  * Resolves the filter field through synonyms, then validates string values for
@@ -339,6 +381,10 @@ function resolveTimeFilter(
 function resolveFilter(filter: AnalysisFilter, model: SemanticModel): FilterResolution {
   const dimension = resolveEntry(filter.field, model.dimensions);
   if (!dimension) {
+    // Dimensions win when a term could be either — measure thresholds are the
+    // narrower feature, and dimension synonyms are user-facing vocabulary.
+    const measure = resolveEntry(filter.field, model.measures);
+    if (measure) return resolveMeasureFilter(filter, measure);
     return inferFieldFromValue(filter, model) ?? { status: "unknown_field" };
   }
   if (dimension.kind === "time") {
@@ -728,10 +774,38 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
         ],
       };
     }
+    if (resolution.status === "invalid_measure_filter") {
+      return {
+        status: "unsupported",
+        reason: resolution.reason,
+        suggestions: [`Re-draft the ${resolution.measure.label} filter with gte, lte, or between and numeric values.`],
+      };
+    }
   }
   const filters = filterResolutions.map(
     (resolution) => (resolution as Extract<FilterResolution, { status: "ok" }>).filter,
   );
+
+  // Measure thresholds (HAVING) act on grouped aggregates, so two shapes are
+  // out: a distribution (bins raw rows — there is no aggregate to threshold)
+  // and a previous-period comparison (the % change is a window function, which
+  // SQL computes after HAVING).
+  if (filters.some((filter) => filter.field in model.measures)) {
+    if (draft.analysisType === "distribution") {
+      return {
+        status: "unsupported",
+        reason: "A distribution bins raw values of one population; a threshold on an aggregate does not apply.",
+        suggestions: ["Drop the measure threshold, or ask a category comparison instead."],
+      };
+    }
+    if (comparison) {
+      return {
+        status: "unsupported",
+        reason: "A threshold on a measure cannot combine with a previous-period % change.",
+        suggestions: ["Drop the change comparison, or threshold the plain measure instead."],
+      };
+    }
+  }
 
   // "Latest/current/recent" is a time window, not a measure. On a snapshot
   // question (no displayed time dimension) with no time filter pinning the
@@ -921,6 +995,9 @@ export function explainSemanticTerm(sourceId: string, term: string): ViewSpec {
       message:
         `${measure.description} Aggregation: ${measure.aggregation}. ` +
         `SQL expression: ${measure.expression}. ` +
+        // The "why this aggregation" sentence — it answers "why medians?"
+        // without a separate question channel.
+        (measure.aggregationNote ? `${measure.aggregationNote} ` : "") +
         `Definition version ${measure.version}; source ${model.sourceSystem}, refreshed ${model.lastRefresh}.` +
         recencyNote,
       tone: "neutral",
@@ -943,6 +1020,25 @@ export function explainSemanticTerm(sourceId: string, term: string): ViewSpec {
           : ""),
       tone: "neutral",
       suggestions: [],
+    };
+  }
+
+  // Improvement plan ⑤: dataset-level questions ("where does the data come
+  // from", "how fresh is it") are also semantic-layer facts — same channel,
+  // same no-SQL rule.
+  if (DATASET_WORDS.test(term)) {
+    return {
+      kind: "notice",
+      title: `About “${model.label}”`,
+      message:
+        `Source: ${model.sourceSystem}. ` +
+        (model.rowScale ? `${model.rowScale}. ` : "") +
+        (model.availableRange
+          ? `Covers ${model.availableRange[0]} → ${model.availableRange[1]}. `
+          : "") +
+        `Last refresh: ${model.lastRefresh}. Semantic model version ${model.version}.`,
+      tone: "neutral",
+      suggestions: ["Ask “what can I ask?” for the full catalog of measures and dimensions."],
     };
   }
 

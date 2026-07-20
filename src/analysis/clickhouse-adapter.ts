@@ -5,6 +5,7 @@ import type {
   CompiledQuery,
   ResolvedAnalysisRequest,
   SemanticDimension,
+  SemanticMeasure,
   SemanticModel,
   SourceAdapter,
 } from "./types";
@@ -69,6 +70,36 @@ function compileFilter(
   }
 }
 
+/**
+ * A measure filter compiles to HAVING over the full aggregate expression (not
+ * the SELECT alias, so the thresholded measure need not be displayed). The
+ * planner has already restricted operators to numeric thresholds.
+ */
+function compileMeasureFilter(
+  filter: AnalysisFilter,
+  measure: SemanticMeasure,
+  index: number,
+  params: Record<string, unknown>,
+): string {
+  const key = `having_${index}`;
+  switch (filter.operator) {
+    case "between": {
+      const [from, to] = filter.value as number[];
+      params[`${key}_from`] = from;
+      params[`${key}_to`] = to;
+      return `${measure.expression} >= {${key}_from:Float64} AND ${measure.expression} <= {${key}_to:Float64}`;
+    }
+    case "gte":
+      params[key] = filter.value;
+      return `${measure.expression} >= {${key}:Float64}`;
+    case "lte":
+      params[key] = filter.value;
+      return `${measure.expression} <= {${key}:Float64}`;
+    default:
+      throw new Error(`Measure filter on ${filter.field} does not support ${filter.operator}.`);
+  }
+}
+
 function resultLimit(request: ResolvedAnalysisRequest): number {
   if (request.limit !== undefined) return Math.min(Math.max(request.limit, 1), MAX_RESULT_ROWS);
   switch (request.analysisType) {
@@ -130,11 +161,20 @@ export function compileClickHouseQuery(
     return `${measure.expression} AS ${id}`;
   });
 
-  const filters = request.filters.map((filter, index) => {
+  // WHERE and HAVING are split here: dimension filters scope rows before
+  // aggregation, measure filters threshold the aggregates after GROUP BY.
+  const filters: string[] = [];
+  const havingFilters: string[] = [];
+  for (const [index, filter] of request.filters.entries()) {
+    const measure = model.measures[filter.field];
+    if (measure) {
+      havingFilters.push(compileMeasureFilter(filter, measure, index, params));
+      continue;
+    }
     const dimension = model.dimensions[filter.field];
-    if (!dimension) throw new Error(`Unknown governed filter dimension: ${filter.field}`);
-    return compileFilter(filter, dimension, index, params);
-  });
+    if (!dimension) throw new Error(`Unknown governed filter field: ${filter.field}`);
+    filters.push(compileFilter(filter, dimension, index, params));
+  }
 
   // A distribution bins raw per-row values, not grouped aggregates: same
   // governed table and WHERE filters, but histogram(20) replaces GROUP BY.
@@ -211,6 +251,7 @@ export function compileClickHouseQuery(
     dimensions.length > 0 && measures.length > 0
       ? `GROUP BY ${dimensionAliases.join(", ")}`
       : "",
+    havingFilters.length > 0 ? `HAVING ${havingFilters.join("\n  AND ")}` : "",
     trendWindow,
     requestedOrder.length > 0 || defaultOrder.length > 0
       ? `ORDER BY ${(requestedOrder.length > 0 ? requestedOrder : defaultOrder).join(", ")}`
