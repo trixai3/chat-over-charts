@@ -54,12 +54,26 @@ export type SeriesSelection = {
  */
 export type Comparison = "vs_previous_period";
 
-/** Terms may be semantic IDs, labels, or registered synonyms. */
+/**
+ * The vetted aggregation vocabulary. A closed enum, so the model can compose
+ * "aggregation of field" without ever holding SQL — the grammar is the
+ * guardrail. `avg`/`sum` are deliberately absent: on right-skewed prices the
+ * mean misleads, and prices are not additive.
+ */
+export type AggregationKind = "median" | "p25" | "p75" | "p90" | "max";
+
+/**
+ * A measure the model composed from the grammar instead of naming a
+ * pre-registered measure: "top price" → { field: "price", aggregation: "p90" }.
+ */
+export type ComposedMeasure = { field: string; aggregation: AggregationKind };
+
+/** Terms may be semantic IDs, labels, registered synonyms, or composed measures. */
 export type AnalysisDraft = {
   question: string;
   sourceId: string;
   analysisType?: AnalysisType;
-  measures: string[];
+  measures: Array<string | ComposedMeasure>;
   dimensions: AnalysisField[];
   filters: AnalysisFilter[];
   orderBy: AnalysisOrder[];
@@ -70,8 +84,12 @@ export type AnalysisDraft = {
 };
 
 /** Every field has been resolved to a governed semantic ID. */
-export type ResolvedAnalysisRequest = Omit<AnalysisDraft, "analysisType" | "seriesSelection"> & {
+export type ResolvedAnalysisRequest = Omit<
+  AnalysisDraft,
+  "analysisType" | "seriesSelection" | "measures"
+> & {
   analysisType: AnalysisType;
+  measures: string[];
   seriesSelection?: SeriesSelection & { by: string };
 };
 
@@ -79,7 +97,12 @@ export type Clarification = {
   field: string;
   question: string;
   options: Array<{ id: string; label: string; description?: string }>;
-  recommended: string;
+  /**
+   * Omitted when no option is safe to nudge toward — e.g. place disambiguation,
+   * where recommending the biggest candidate silently reintroduces the wrong-
+   * place guess this feature exists to prevent.
+   */
+  recommended?: string;
   reason: string;
 };
 
@@ -103,6 +126,12 @@ export type AnalysisPlanResult =
       status: "unsupported";
       reason: string;
       suggestions: string[];
+      /**
+       * Set only for an unresolved value against a governed dimension — lets a
+       * caller retry the term through a live lookup (e.g. place resolution)
+       * instead of re-parsing the reason string.
+       */
+      unknownValue?: { term: string; dimensionId: string };
     };
 
 export type DimensionKind = "time" | "category" | "identifier";
@@ -143,6 +172,43 @@ export type SemanticMeasure = {
   valueExpression?: string;
 };
 
+/** One entry on a value field's vetted aggregation menu. */
+export type VettedAggregation = {
+  kind: AggregationKind;
+  label: string;
+  description: string;
+  synonyms: string[];
+  /** Extra limitation this aggregation adds on top of the field's own. */
+  caveat?: string;
+};
+
+/**
+ * A raw quantitative column plus its vetted aggregation menu. The registry
+ * governs the ingredients (which column, which aggregations are honest for
+ * its distribution); the model compose which menu item matches the user's
+ * intent. Concrete `SemanticMeasure`s are generated from this by
+ * `buildMeasures` so everything downstream (pipeline, adapter, chart policy)
+ * is unchanged.
+ */
+export type SemanticValueField = {
+  id: string;
+  label: string;
+  /** Raw per-row SQL expression the aggregations summarize. */
+  valueExpression: string;
+  format: ValueFormat;
+  /** Wordings that name the field itself; they resolve to the default aggregation. */
+  synonyms: string[];
+  /**
+   * Why the menu is shaped this way (e.g. why median, not mean). Becomes each
+   * generated measure's aggregationNote.
+   */
+  distributionNote: string;
+  limitations: string[];
+  aggregations: VettedAggregation[];
+  defaultAggregation: AggregationKind;
+  version: string;
+};
+
 export type SemanticDimension = {
   id: string;
   label: string;
@@ -180,6 +246,8 @@ export type SemanticModel = {
   version: string;
   figurePolicyVersion: string;
   measures: Record<string, SemanticMeasure>;
+  /** Grammar source for generated measures; composed {field, aggregation} terms resolve here. */
+  valueFields?: Record<string, SemanticValueField>;
   dimensions: Record<string, SemanticDimension>;
   defaults: {
     measure: string;

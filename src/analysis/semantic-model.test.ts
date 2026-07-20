@@ -437,9 +437,10 @@ describe("describeDataSource", () => {
     if (spec.kind !== "table") return;
 
     expect(spec.title).toBe("UK House Price Paid — what you can ask");
-    // One row per governed concept: 2 measures + 6 dimensions.
-    expect(spec.rows.filter((row) => row.role === "measure")).toHaveLength(2);
-    expect(spec.rows.filter((row) => row.role === "dimension")).toHaveLength(6);
+    // One row per governed concept: 5 generated price measures + count + 7 dimensions
+    // (county, district, town, property_type, tenure, sale_date, locality).
+    expect(spec.rows.filter((row) => row.role === "measure")).toHaveLength(6);
+    expect(spec.rows.filter((row) => row.role === "dimension")).toHaveLength(7);
 
     const median = spec.rows.find((row) => row.name === "Median sale price");
     expect(median?.details).toContain("quantileTDigest median");

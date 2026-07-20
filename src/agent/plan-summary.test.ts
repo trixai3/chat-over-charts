@@ -85,10 +85,11 @@ describe("catalogSummary", () => {
     const summary = catalogSummary(describeDataSource("uk-house-prices"));
     // Bounded on purpose: names only — descriptions, examples, and provenance
     // are rendering data and stay on the frontend tile.
-    expect(summary).toContain("measures [Median sale price, Transactions]");
+    expect(summary).toContain("measures [Median sale price, Entry sale price (25th percentile),");
+    expect(summary).toContain("Transactions]");
     expect(summary).toContain("dimensions [Sale date, County, District, Town or city,");
     expect(summary).toContain("Covers 1995-01-01 → 2026-05-29");
-    expect(summary.length).toBeLessThan(500);
+    expect(summary.length).toBeLessThan(700);
   });
 
   it("relays the notice for an unknown source", () => {

@@ -1,5 +1,65 @@
-import type { SemanticModel } from "../types";
+import type { SemanticModel, SemanticValueField } from "../types";
+import { buildMeasures } from "../measure-grammar";
 import { ukHousePriceDimensionValues } from "./uk-house-prices.values";
+
+/**
+ * The price grammar: one raw column plus the aggregations that are honest for
+ * a right-skewed distribution. The model maps user intent ("top price",
+ * "entry price") onto this menu; everything off-menu still clarifies.
+ * Deliberately absent: avg/sum (the mean misleads on skew, prices are not
+ * additive) and min (Land Registry contains nominal £1 transfers, so the
+ * minimum is a data artifact, not a market fact).
+ */
+const price: SemanticValueField = {
+  id: "price",
+  label: "Sale price",
+  valueExpression: "price",
+  format: { style: "currency", currency: "GBP" },
+  synonyms: ["house price", "sale price", "property price", "price", "prices"],
+  distributionNote:
+    "Averages are misleading for right-skewed prices, so this source publishes the median instead.",
+  limitations: [
+    "Price changes can reflect a changing mix of property types sold as well as market movement.",
+  ],
+  defaultAggregation: "median",
+  version: "1.0.0",
+  aggregations: [
+    {
+      kind: "median",
+      label: "Median sale price",
+      description: "The median completed transaction price in the selected population.",
+      synonyms: ["median price", "typical price", "middle price"],
+    },
+    {
+      kind: "p25",
+      label: "Entry sale price (25th percentile)",
+      description:
+        "The price a quarter of completed sales fall below — the entry point of the selected market.",
+      synonyms: ["entry price", "starter price", "affordable price", "lower quartile price", "p25 price", "25th percentile price"],
+    },
+    {
+      kind: "p75",
+      label: "Upper-quartile sale price (75th percentile)",
+      description: "The price three quarters of completed sales fall below.",
+      synonyms: ["upper quartile price", "p75 price", "75th percentile price"],
+    },
+    {
+      kind: "p90",
+      label: "Top-of-market sale price (90th percentile)",
+      description:
+        "The price the top tenth of completed sales exceed — the robust top of the selected market.",
+      synonyms: ["top price", "top of market price", "high end price", "luxury price", "premium price", "p90 price", "90th percentile price"],
+    },
+    {
+      kind: "max",
+      label: "Highest recorded sale price",
+      description: "The single largest completed transaction in the selected population.",
+      synonyms: ["maximum price", "max price", "highest price", "record price", "most expensive sale"],
+      caveat:
+        "A single unusual transaction (a portfolio deal or data quirk) defines this number — treat it as a record, not the market.",
+    },
+  ],
+};
 
 /**
  * A governed description of the existing Land Registry table. Adding another
@@ -30,23 +90,9 @@ export const ukHousePrices: SemanticModel = {
     timeGrain: "year",
     seriesRankMeasure: "transaction_count",
   },
+  valueFields: { price },
   measures: {
-    median_price: {
-      id: "median_price",
-      label: "Median sale price",
-      description: "The median completed transaction price in the selected population.",
-      expression: "round(quantileTDigest(0.5)(price))",
-      format: { style: "currency", currency: "GBP" },
-      aggregation: "quantileTDigest median",
-      version: "1.0.0",
-      synonyms: ["house price", "sale price", "property price", "median price", "price", "prices"],
-      limitations: [
-        "Price changes can reflect a changing mix of property types sold as well as market movement.",
-      ],
-      aggregationNote:
-        "Averages are misleading for right-skewed prices, so this source publishes the median instead.",
-      valueExpression: "price",
-    },
+    ...buildMeasures(price),
     transaction_count: {
       id: "transaction_count",
       label: "Transactions",
@@ -107,6 +153,21 @@ export const ukHousePrices: SemanticModel = {
       cardinality: 1173,
       valueNormalization: "uppercase",
       values: ukHousePriceDimensionValues.town,
+    },
+    // 24,049 values deliberately unsnapshotted (unlike county/district/town
+    // above): a locality is a neighbourhood name, not a bounded administrative
+    // list, and 62% of them span multiple districts ("Clapham" alone resolves
+    // to 11 places). Existence is validated by a live place lookup at query
+    // time (place-resolver.ts) instead of a values array.
+    locality: {
+      id: "locality",
+      label: "Locality",
+      description: "Land Registry locality — a neighbourhood within a district (e.g. Clapham).",
+      expression: "locality",
+      kind: "category",
+      synonyms: ["locality", "neighbourhood", "area name"],
+      cardinality: 24049,
+      valueNormalization: "uppercase",
     },
     property_type: {
       id: "property_type",

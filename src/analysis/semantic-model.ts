@@ -11,7 +11,8 @@ import type {
   SemanticModel,
   SeriesSelection,
 } from "./types";
-import { MAX_LINE_SERIES, selectProvisionalFigure } from "./chart-policy";
+import { DEFAULT_LINE_SERIES, MAX_LINE_SERIES, selectProvisionalFigure } from "./chart-policy";
+import { composedLabel, resolveComposedMeasure } from "./measure-grammar";
 
 const MODELS: Record<string, SemanticModel> = {
   [ukHousePrices.id]: ukHousePrices,
@@ -513,6 +514,13 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
   let comparison = draft.comparison;
   const measureTerms = draft.measures;
   const measures = measureTerms.map((term) => {
+    // A composed {field, aggregation} term resolves through the grammar: the
+    // model already mapped intent to a vetted menu item, so string matching
+    // is not involved — only membership checks are.
+    if (typeof term !== "string") {
+      const composed = resolveComposedMeasure(term, model);
+      return composed.status === "ok" ? composed.measure : undefined;
+    }
     const direct =
       resolveEntry(term, model.measures) ??
       // "latest median price" = the median measure; the recency word is a time
@@ -525,7 +533,33 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     if (viaChange) comparison = "vs_previous_period";
     return viaChange;
   });
-  const missingMeasure = measureTerms.find((_, index) => !measures[index]);
+  const missingTerm = measureTerms.find((_, index) => !measures[index]);
+  if (missingTerm !== undefined && typeof missingTerm !== "string") {
+    const composed = resolveComposedMeasure(missingTerm, model);
+    const menu =
+      composed.status === "unvetted_aggregation"
+        ? ` Vetted aggregations of “${composed.field.label}”: ${composed.field.aggregations
+            .map((aggregation) => aggregation.kind)
+            .join(", ")}.`
+        : "";
+    return {
+      status: "needs_clarification",
+      resolved: { ...draft },
+      ambiguities: [
+        {
+          field: "measures",
+          question:
+            composed.status === "unvetted_aggregation"
+              ? `“${composedLabel(missingTerm)}” is not on the vetted menu.${menu} Which governed measure should be shown?`
+              : `“${composedLabel(missingTerm)}” names no governed value field. Which governed measure should be shown?`,
+          options: measureClarificationOptions(model),
+          recommended: model.defaults.measure,
+          reason: "Only vetted aggregations of governed value fields can be queried.",
+        },
+      ],
+    };
+  }
+  const missingMeasure = missingTerm as string | undefined;
   if (missingMeasure) {
     // Design §9.1: the aggregation is material. "average X" must not silently
     // resolve to a differently aggregated governed measure — surface the
@@ -584,7 +618,9 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
   // deterministically, since prompt wording can't be trusted to self-report.
   // Verbatim governed ids are the user-confirmed escape hatch — otherwise a
   // clarification answered with the exact id would loop forever.
-  const measuresAreVerbatimIds = draft.measures.every((term) => term in model.measures);
+  const measuresAreVerbatimIds = draft.measures.every(
+    (term) => typeof term === "string" && term in model.measures,
+  );
   const firstMeasure = measures[0]!;
   if (
     AVERAGE_WORDS.test(draft.question) &&
@@ -772,6 +808,7 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
           ...(nearestValues.length > 0 ? [`Did you mean "${nearestValues[0]}"?`] : []),
           "Check the spelling, or ask what values exist for this dimension.",
         ],
+        unknownValue: { term: resolution.term, dimensionId: resolution.dimension.id },
       };
     }
     if (resolution.status === "invalid_measure_filter") {
@@ -823,7 +860,8 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
     timeDimensionId &&
     !hasTimeDimension &&
     !hasTimeBound &&
-    (recency.test(draft.question) || draft.measures.some((term) => recency.test(term)))
+    (recency.test(draft.question) ||
+      draft.measures.some((term) => typeof term === "string" && recency.test(term)))
   ) {
     const [year, month, day] = model.lastRefresh.split("-");
     const trailingStart = `${Number(year) - 1}-${month}-${day}`;
@@ -908,6 +946,11 @@ export function planAnalysis(draft: AnalysisDraft): AnalysisPlanResult {
             options: [
               {
                 id: "top_series",
+                label: `Top ${DEFAULT_LINE_SERIES} by ${rankLabel.toLowerCase()}`,
+                description: `Call inspectAnalysis again with seriesSelection { "method": "top", "n": ${DEFAULT_LINE_SERIES} }.`,
+              },
+              {
+                id: "top_series_max",
                 label: `Top ${MAX_LINE_SERIES} by ${rankLabel.toLowerCase()}`,
                 description: `Call inspectAnalysis again with seriesSelection { "method": "top", "n": ${MAX_LINE_SERIES} }.`,
               },

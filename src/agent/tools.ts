@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { describeDataSource, explainSemanticTerm, planAnalysis } from "../analysis/semantic-model";
+import { planWithPlaceResolution } from "../analysis/place-resolver";
 import { runAnalysis, summarizeSpec } from "../analysis/pipeline";
 import type { AnalysisPlanResult } from "../analysis/types";
 import type { ViewSpec } from "../shared/view-spec";
@@ -25,11 +26,26 @@ export const analysisDraftSchema = z.object({
         "how values spread within one population ('what do prices look like in X', 'price histogram').",
     ),
   measures: z
-    .array(z.string())
+    .array(
+      z.union([
+        z.string(),
+        z.object({
+          field: z.string().describe("A governed value field, e.g. 'price'."),
+          aggregation: z.enum(["median", "p25", "p75", "p90", "max"]),
+        }),
+      ]),
+    )
     .default([])
     .describe(
-      "The user's own measure wording (or governed IDs once resolved). " +
-        "Never SQL expressions, and never substitute a different aggregation than the user asked for.",
+      "Each entry is either the user's wording (a string, resolved against governed measures and " +
+        "synonyms) or a composed governed measure {field, aggregation}. When wording names an intent " +
+        "rather than a measure, compose it from the vetted menu of field 'price' (right-skewed, so " +
+        "no averages): median = the typical level and the default; p25 = the entry/affordable end; " +
+        "p75 = the upper quartile; p90 = the top of the market/high end; max = the single highest " +
+        "recorded sale (outlier-sensitive — only for 'record'/'most expensive ever' questions). " +
+        "For counts use the string 'transactions'. Never SQL expressions, and never answer one " +
+        "intent with a different one (a 'top price' question is never answered with the median) — " +
+        "the tile label always discloses the aggregation used.",
     ),
   dimensions: z
     .array(
@@ -110,7 +126,7 @@ export function planSummary(plan: AnalysisPlanResult): string {
     return `NEEDS_CLARIFICATION; ${plan.ambiguities
       .map(
         (item) =>
-          `${item.field}: ${item.question} options=[${item.options.map((option) => `${option.id}:${option.label}`).join("|")}] recommended=${item.recommended} because ${item.reason}`,
+          `${item.field}: ${item.question} options=[${item.options.map((option) => `${option.id}:${option.label}`).join("|")}] recommended=${item.recommended ?? "none"} because ${item.reason}`,
       )
       .join("; ")}; call requestClarification.`;
   }
@@ -123,7 +139,7 @@ export const inspectAnalysis = tool({
     "Resolve an analytical request through the selected semantic model and choose a provisional figure. " +
     "Always call this before renderAnalysis. It returns governed IDs or supported clarification choices.",
   inputSchema: analysisDraftSchema,
-  execute: async (draft): Promise<AnalysisPlanResult> => planAnalysis(draft),
+  execute: async (draft): Promise<AnalysisPlanResult> => planWithPlaceResolution(draft),
   toModelOutput: ({ output }) => ({
     type: "text",
     value: planSummary(output as AnalysisPlanResult),
