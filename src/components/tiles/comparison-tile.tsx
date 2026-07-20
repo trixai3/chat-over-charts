@@ -43,9 +43,11 @@ export function ComparisonTile({
             >
               <span className="truncate text-xs font-medium">{row.label}</span>
 
-              <span className="h-5 rounded-sm bg-black/[0.06] dark:bg-white/10">
+              {/* Meter spec: the unfilled track is a lighter step of the fill's own
+                  ramp, so the bar reads as one object at two states, not two bars. */}
+              <span className="h-4 rounded-[4px] bg-[var(--series-1-track)]">
                 <span
-                  className="block h-full rounded-sm bg-sky-500/70 transition-[width]"
+                  className="chart-meter block h-full rounded-r-[4px] bg-[var(--series-1)] transition-[width]"
                   style={{ width: `${(row.value / max) * 100}%` }}
                 />
               </span>
@@ -55,13 +57,15 @@ export function ComparisonTile({
               </span>
 
               <span
-                className={`text-right font-mono text-xs tabular-nums ${
-                  row.delta === undefined
-                    ? "text-black/25 dark:text-white/25"
-                    : row.delta > 0
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-rose-600 dark:text-rose-400"
-                }`}
+                className="text-right font-mono text-xs tabular-nums"
+                style={{
+                  color:
+                    row.delta === undefined
+                      ? "var(--chart-muted)"
+                      : row.delta > 0
+                        ? "var(--delta-up)"
+                        : "var(--delta-down)",
+                }}
               >
                 {row.delta === undefined ? "—" : formatDelta(row.delta)}
               </span>

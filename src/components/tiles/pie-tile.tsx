@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import type { ViewSpec } from "@/shared/view-spec";
 import { formatValue } from "@/shared/format";
 import { TileFrame } from "./tile-frame";
+import { seriesColor } from "./chart-palette";
 
 type Spec = Extract<ViewSpec, { kind: "pie" }>;
 
@@ -10,7 +12,6 @@ const SIZE = 160;
 const CENTER = SIZE / 2;
 const OUTER_R = 70;
 const INNER_R = 40; // donut hole, not a full pie — keeps the legend legible next to it
-const COLORS = ["#0ea5e9", "#f59e0b", "#10b981", "#f43f5e", "#8b5cf6", "#06b6d4", "#84cc16", "#f97316"];
 
 function arcPath(startAngle: number, endAngle: number): string {
   const point = (r: number, angle: number): [number, number] => [
@@ -38,6 +39,7 @@ function arcPath(startAngle: number, endAngle: number): string {
 type Arc = { slice: Spec["slices"][number]; path: string; color: string; fraction: number };
 
 export function PieTile({ spec }: { spec: Spec }) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const total = spec.slices.reduce((sum, slice) => sum + slice.value, 0);
   // Functional scan (no reassigned accumulator) so this stays safe under the
   // React Compiler's render-purity check.
@@ -48,7 +50,7 @@ export function PieTile({ spec }: { spec: Spec }) {
       const arc: Arc = {
         slice,
         path: arcPath(acc.cursor, endAngle),
-        color: COLORS[index % COLORS.length],
+        color: seriesColor(index),
         fraction,
       };
       return { items: [...acc.items, arc], cursor: endAngle };
@@ -65,9 +67,45 @@ export function PieTile({ spec }: { spec: Spec }) {
           role="img"
           aria-label={spec.title}
         >
-          {arcs.map(({ slice, path, color }) => (
-            <path key={slice.label} d={path} fill={color} stroke="white" strokeWidth={1} />
+          {arcs.map(({ slice, path, color }, index) => (
+            <path
+              key={slice.label}
+              className="chart-fade"
+              d={path}
+              fill={color}
+              fillOpacity={hoverIndex === null || hoverIndex === index ? 1 : 0.35}
+              stroke="var(--tile-surface)"
+              strokeWidth={2}
+              style={{ transition: "fill-opacity 120ms" }}
+              onPointerEnter={() => setHoverIndex(index)}
+              onPointerLeave={() => setHoverIndex(null)}
+            />
           ))}
+          {/* The donut hole doubles as the hover readout — no positioning math. */}
+          {hoverIndex !== null && (
+            <g className="pointer-events-none">
+              <text
+                x={CENTER}
+                y={CENTER - 4}
+                textAnchor="middle"
+                fontSize={11}
+                fontWeight={600}
+                fill="currentColor"
+              >
+                {(arcs[hoverIndex].fraction * 100).toFixed(0)}%
+              </text>
+              <text
+                x={CENTER}
+                y={CENTER + 10}
+                textAnchor="middle"
+                fontSize={9}
+                fill="var(--chart-muted)"
+                className="font-mono"
+              >
+                {formatValue(arcs[hoverIndex].slice.value, spec.format)}
+              </text>
+            </g>
+          )}
         </svg>
         <ul className="flex flex-1 flex-col gap-1.5">
           {arcs.map(({ slice, color, fraction }) => (

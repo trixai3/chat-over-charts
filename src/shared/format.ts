@@ -17,6 +17,22 @@ export function formatValue(value: number, format: ValueFormat): string {
   }
 }
 
+/**
+ * Axis-label formatter inferred from the whole time domain, so one axis never
+ * mixes grains: all year-starts → "1995"; all month-starts → "1995-03";
+ * anything else stays a full date. Grain is inferred from the values rather
+ * than carried on the spec — the ISO strings already encode it.
+ */
+export function timeLabelFormatter(times: string[]): (t: string) => string {
+  if (times.length > 0 && times.every((t) => /^\d{4}-01-01$/.test(t))) {
+    return (t) => t.slice(0, 4);
+  }
+  if (times.length > 0 && times.every((t) => /^\d{4}-\d{2}-01$/.test(t))) {
+    return (t) => t.slice(0, 7);
+  }
+  return (t) => t;
+}
+
 export function formatDelta(value: number): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }

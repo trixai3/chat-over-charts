@@ -3,6 +3,27 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Chart tokens. The eight categorical slots are a CVD-validated set in a
+     fixed order — slot N always means hue N, and the order itself is the
+     colorblind-safety mechanism (adjacent slots maximize simulated ΔE). */
+  --tile-surface: #ffffff;
+  --series-1: #2a78d6;
+  --series-2: #008300;
+  --series-3: #e87ba4;
+  --series-4: #eda100;
+  --series-5: #1baf7a;
+  --series-6: #eb6834;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --series-other: #898781;
+  --series-1-track: #dce8f9; /* unfilled meter track: lighter step of slot 1's own ramp */
+  --chart-grid: #e7e6e0;
+  --chart-baseline: #c3c2b7;
+  --chart-muted: #898781;
+  --chart-annotation: #52514e;
+  --delta-up: #006300;
+  --delta-down: #d03b3b;
 }
 
 @theme inline {
@@ -16,6 +37,23 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    /* Same eight hues re-stepped for the dark surface — not a separate palette. */
+    --tile-surface: #171717;
+    --series-1: #3987e5;
+    --series-2: #008300;
+    --series-3: #d55181;
+    --series-4: #c98500;
+    --series-5: #199e70;
+    --series-6: #d95926;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --series-1-track: #1c3450;
+    --chart-grid: #2c2c2a;
+    --chart-baseline: #383835;
+    --chart-annotation: #c3c2b7;
+    --delta-up: #0ca30c;
+    --delta-down: #e66767;
   }
 }
 
@@ -23,4 +61,47 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Chart entrance motion. Pure CSS, once on mount, subtle and fast — the data
+   is the star, the motion just acknowledges it arriving. pathLength={1} on
+   SVG paths normalizes dash units so one rule draws any line. */
+@keyframes chart-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes chart-rise {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+@keyframes chart-extend {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes chart-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.chart-line {
+  stroke-dasharray: 1;
+  animation: chart-draw 700ms ease-out both;
+}
+.chart-bar {
+  transform-origin: bottom;
+  animation: chart-rise 450ms ease-out both;
+}
+.chart-meter {
+  transform-origin: left;
+  animation: chart-extend 450ms ease-out both;
+}
+.chart-fade {
+  animation: chart-fade 500ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart-line,
+  .chart-bar,
+  .chart-meter,
+  .chart-fade {
+    animation: none;
+  }
 }
