@@ -510,9 +510,10 @@ export async function runAnalysis(
   };
 }
 
-// The model never sees the rendered figure (toModelOutput compresses tool
-// results into this one line), so its verdict text can only be grounded in
-// facts stated here — the actual displayed window, not the requested one.
+// The model never sees the rendered figure — toModelOutput compresses tool
+// results into this summary — so its verdict text can only be grounded in
+// facts stated here: the actual displayed window plus the bounded decision
+// detail below, never the requested-but-not-displayed range.
 function scopeSuffix(scope: string[]): string {
   return scope.length > 0 ? ` scope: ${scope.join("; ")}.` : "";
 }
@@ -526,7 +527,75 @@ function timeSeriesRange(series: Array<{ points: Array<{ t: string; v: number }>
   return { values, times };
 }
 
+// Decision-data budget (improvement plan ②): the model may see enough of the
+// result to reason about it ("how many districts are over 500k?"), but the
+// widening is bounded — over budget, the summary falls back to the base line.
+// This keeps invariant 2 intact: rendering data still never enters the prompt
+// wholesale.
+const MAX_SUMMARY_BYTES = 4096;
+const MAX_COMPARISON_DETAIL_ROWS = 40;
+const TABLE_PREVIEW_ROWS = 5;
+
+function seriesDetail(
+  series: Array<{ label: string; points: Array<{ t: string; v: number }> }>,
+): string {
+  return series
+    .map((entry) => {
+      const first = entry.points[0];
+      const last = entry.points[entry.points.length - 1];
+      let min = entry.points[0];
+      let max = entry.points[0];
+      for (const point of entry.points) {
+        if (point.v < min.v) min = point;
+        if (point.v > max.v) max = point;
+      }
+      return (
+        `${entry.label}: first ${first.v} at ${first.t}, last ${last.v} at ${last.t}, ` +
+        `min ${min.v} at ${min.t}, max ${max.v} at ${max.t}`
+      );
+    })
+    .join("; ");
+}
+
+/** The bounded per-kind widening. Empty string means the base line is already enough. */
+function decisionDetail(spec: ViewSpec): string {
+  switch (spec.kind) {
+    case "comparison":
+      if (spec.rows.length > MAX_COMPARISON_DETAIL_ROWS) return "";
+      return `Values: ${spec.rows
+        .map((row) => `${row.label}=${row.value}${row.delta !== undefined ? ` (Δ ${row.delta})` : ""}`)
+        .join("; ")}.`;
+    case "timeseries":
+    case "area":
+      return `Per series: ${seriesDetail(spec.series)}.`;
+    case "pie": {
+      const total = spec.slices.reduce((sum, slice) => sum + slice.value, 0);
+      if (total <= 0) return "";
+      return `Slices: ${spec.slices
+        .map((slice) => `${slice.label} ${((slice.value / total) * 100).toFixed(1)}%`)
+        .join("; ")}.`;
+    }
+    case "table": {
+      const preview = spec.rows.slice(0, TABLE_PREVIEW_ROWS);
+      if (preview.length === 0) return "";
+      return `First ${preview.length} rows: ${preview
+        .map((row) => spec.columns.map((column) => `${column.key}=${row[column.key]}`).join(", "))
+        .join(" | ")}.`;
+    }
+    default:
+      return "";
+  }
+}
+
 export function summarizeSpec(spec: ViewSpec): string {
+  const base = baseSummary(spec);
+  const detail = decisionDetail(spec);
+  if (!detail) return base;
+  const full = `${base} ${detail}`;
+  return Buffer.byteLength(full, "utf8") > MAX_SUMMARY_BYTES ? base : full;
+}
+
+function baseSummary(spec: ViewSpec): string {
   switch (spec.kind) {
     case "kpi":
       return `${spec.label}: ${spec.value}.${scopeSuffix(spec.explanation.scope)}`;

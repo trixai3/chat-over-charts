@@ -21,6 +21,7 @@ export const ukHousePrices: SemanticModel = {
   sourceSystem: "HM Land Registry Price Paid Data",
   lastRefresh: "2026-05-29",
   availableRange: ["1995-01-01", "2026-05-29"],
+  rowScale: "≈31 million rows — one per completed sale",
   version: "2.0.0",
   figurePolicyVersion: "1.0.0",
   defaults: {

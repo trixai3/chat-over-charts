@@ -230,6 +230,115 @@ describe("governed figure pipeline with UK house-price data", () => {
     // strings that describe applied filters/grain in human words.
     expect(summary).toContain("displayed 2024-01-01 → 2025-01-01");
     expect(summary).toContain("scope:");
+    // Improvement plan ②: bounded decision data — each series' endpoints and
+    // extremes are stated so the model can reason about the trend it plotted.
+    expect(summary).toContain("LAMBETH: first 535000 at 2024-01-01, last 526890 at 2025-01-01");
+    expect(summary).toContain("min 526890 at 2025-01-01, max 535000 at 2024-01-01");
+  });
+
+  it("summarizeSpec lists every comparison value so the model can count and threshold", async () => {
+    const plan = planAnalysis({
+      question: "Compare London boroughs by median price",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["median price"],
+      dimensions: [{ field: "borough" }],
+      filters: [{ field: "county", operator: "equals", value: "Greater London" }],
+      orderBy: [{ field: "median price", direction: "desc" }],
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    const adapter: SourceAdapter = {
+      execute: async () => ({
+        rows: [
+          { district: "WANDSWORTH", median_price: 630000 },
+          { district: "LAMBETH", median_price: 526890 },
+          { district: "HAVERING", median_price: 445500 },
+        ],
+        stats,
+      }),
+    };
+    const summary = summarizeSpec((await runAnalysis(plan, adapter)).spec);
+    expect(summary).toContain("Values: WANDSWORTH=630000; LAMBETH=526890; HAVERING=445500.");
+  });
+
+  it("summarizeSpec falls back to the base line when the detail would blow the byte budget", async () => {
+    const plan = planAnalysis({
+      question: "Compare towns by median price",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["median price"],
+      dimensions: [{ field: "town" }],
+      filters: [],
+      orderBy: [{ field: "median price", direction: "desc" }],
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    // 40 rows × ~200-byte labels ≈ 8KB of detail — over the 4KB summary cap.
+    const adapter: SourceAdapter = {
+      execute: async () => ({
+        rows: Array.from({ length: 40 }, (_, index) => ({
+          town: `TOWN-${index}-${"X".repeat(200)}`,
+          median_price: 400000 + index,
+        })),
+        stats,
+      }),
+    };
+    const summary = summarizeSpec((await runAnalysis(plan, adapter)).spec);
+    expect(summary).toContain("40 categories.");
+    expect(summary).not.toContain("Values:");
+    expect(Buffer.byteLength(summary, "utf8")).toBeLessThanOrEqual(4096);
+  });
+
+  it("summarizeSpec states every pie slice with its share", async () => {
+    const plan = planAnalysis({
+      question: "Share of sales by property type",
+      sourceId: "uk-house-prices",
+      analysisType: "category_comparison",
+      measures: ["transactions"],
+      dimensions: [{ field: "property type" }],
+      filters: [],
+      orderBy: [],
+      preferredFigure: "pie",
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    const adapter: SourceAdapter = {
+      execute: async () => ({
+        rows: [
+          { property_type: "terraced", transaction_count: 500 },
+          { property_type: "flat", transaction_count: 300 },
+          { property_type: "detached", transaction_count: 200 },
+        ],
+        stats,
+      }),
+    };
+    const summary = summarizeSpec((await runAnalysis(plan, adapter)).spec);
+    expect(summary).toContain("Slices: terraced 50.0%; flat 30.0%; detached 20.0%.");
+  });
+
+  it("summarizeSpec previews the first table rows", async () => {
+    const plan = planAnalysis({
+      question: "List boroughs with prices and volumes",
+      sourceId: "uk-house-prices",
+      analysisType: "detail",
+      measures: ["median price"],
+      dimensions: [{ field: "borough" }],
+      filters: [{ field: "county", operator: "equals", value: "Greater London" }],
+      orderBy: [],
+    });
+    if (plan.status !== "ready") throw new Error("Expected ready plan");
+    const adapter: SourceAdapter = {
+      execute: async () => ({
+        rows: Array.from({ length: 8 }, (_, index) => ({
+          district: `DISTRICT-${index}`,
+          median_price: 400000 + index,
+        })),
+        stats,
+      }),
+    };
+    const summary = summarizeSpec((await runAnalysis(plan, adapter)).spec);
+    expect(summary).toContain("8 rows");
+    expect(summary).toContain("First 5 rows:");
+    expect(summary).toContain("district=DISTRICT-0, median_price=400000");
+    expect(summary).not.toContain("DISTRICT-5");
   });
 
   it("returns a too-large notice instead of streaming a spec over the byte cap", async () => {

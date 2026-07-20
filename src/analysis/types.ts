@@ -171,6 +171,12 @@ export type SemanticModel = {
   sourceSystem: string;
   lastRefresh: string;
   availableRange?: [string, string];
+  /**
+   * Human-readable source grain and scale ("≈31 million rows — one per
+   * completed sale"). Stated here rather than counted at request time so the
+   * catalog tile never needs a query.
+   */
+  rowScale?: string;
   version: string;
   figurePolicyVersion: string;
   measures: Record<string, SemanticMeasure>;

@@ -48,6 +48,8 @@ const SYSTEM_PROMPT = [
   "When the user names a chart style, pass it as preferredFigure; the READY summary lists the figure plus compatible alternatives — only switch figures by re-calling renderAnalysis with a preferredFigure from that list.",
   "Map phrasing to figures: 'share of'/'proportion'/'breakdown' suggests pie, 'correlation'/'X vs Y' suggests scatter, 'spread'/'distribution' of values means analysisType distribution, 'over time' means trend; when nothing is implied, omit preferredFigure.",
   "If the user asks how a measure or value is defined or calculated, call explainSemantics with their term instead of running an analysis.",
+  "If the user asks what data is available, what they can ask, or where the data comes from, call describeData to show the catalog — never refuse these questions.",
+  "When the question needs a judgement (which is better, is it expensive, which should I pick), first render the supporting evidence — one or more renderAnalysis calls — then conclude with emitVerdict stating only facts from those render summaries.",
   "If the question is unrelated to the connected data or its figures, call no analysis tool; conclude with emitVerdict (tone neutral) saying only governed housing analytics are supported here.",
   "Finish every turn by calling emitVerdict exactly once.",
 ].join(" ");

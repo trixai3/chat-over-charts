@@ -24,6 +24,7 @@ function toolOutputs(parts: readonly unknown[]): unknown[] {
       return (
         (candidate.type === "tool-renderAnalysis" ||
           candidate.type === "tool-explainSemantics" ||
+          candidate.type === "tool-describeData" ||
           candidate.type === "tool-emitVerdict") &&
         candidate.state === "output-available" &&
         candidate.output !== undefined
@@ -103,6 +104,10 @@ const ACTIVITY_STEPS: Record<string, { active: string; done: string }> = {
   "tool-explainSemantics": {
     active: "Reading the semantic layer…",
     done: "Definition ready · deciding next step…",
+  },
+  "tool-describeData": {
+    active: "Reading the data catalog…",
+    done: "Catalog ready · deciding next step…",
   },
   "tool-emitVerdict": { active: "Writing the verdict…", done: "Verdict delivered" },
 };

@@ -64,6 +64,7 @@ function scriptedModel(steps: LanguageModelV3StreamPart[][]) {
 describe("governed analysis agent", () => {
   it("exposes workflow tools, not chart-specific tools", () => {
     expect(Object.keys(analysisTools)).toEqual([
+      "describeData",
       "inspectAnalysis",
       "requestClarification",
       "renderAnalysis",
@@ -110,6 +111,89 @@ describe("governed analysis agent", () => {
         type: "tool",
         toolName: "emitVerdict",
       });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("answers 'what can I ask?' with a catalog tile, not a refusal", async () => {
+    const model = scriptedModel([
+      [toolCall("catalog-1", "describeData", { sourceId: "uk-house-prices" }), finish("tool-calls")],
+      [
+        toolCall("verdict-1", "emitVerdict", {
+          headline: "Two measures across five dimensions of UK sales are available.",
+          tone: "neutral",
+        }),
+        finish("tool-calls"),
+      ],
+      [finish("stop")],
+    ]);
+    const harness = mockChatAgent(houseAgent, {
+      chatId: "catalog-1",
+      clientData: { model },
+      setupLocals: ({ set }) => set(clickhouseKey, fakeClickHouse),
+    });
+
+    try {
+      const turn = await harness.sendMessage({
+        id: "u1",
+        role: "user",
+        parts: [{ type: "text", text: "What data do you have?" }],
+      });
+      const chunks = JSON.stringify(turn.chunks);
+      expect(turn.chunks.filter((chunk) => chunk.type === "text-delta")).toHaveLength(0);
+      expect(chunks).toContain('"kind":"table"');
+      expect(chunks).toContain("what you can ask");
+      expect(chunks).toContain("Median sale price");
+    } finally {
+      await harness.close();
+    }
+  });
+
+  // Improvement plan ③: a judgement question is answered by composing evidence
+  // figures, then one verdict — the loop must carry multiple renders in a turn.
+  it("supports multiple evidence figures before the single verdict", async () => {
+    const secondRequest = {
+      ...request,
+      question: "And how do transactions compare?",
+      measures: ["transactions"],
+      orderBy: [{ field: "transactions", direction: "desc" }],
+    };
+    const model = scriptedModel([
+      [toolCall("inspect-1", "inspectAnalysis", request), finish("tool-calls")],
+      [
+        toolCall("render-1", "renderAnalysis", request),
+        toolCall("render-2", "renderAnalysis", secondRequest),
+        finish("tool-calls"),
+      ],
+      [
+        toolCall("verdict-1", "emitVerdict", {
+          headline: "Lambeth leads on price and on volume.",
+          tone: "good",
+        }),
+        finish("tool-calls"),
+      ],
+      [finish("stop")],
+    ]);
+    const harness = mockChatAgent(houseAgent, {
+      chatId: "composed-verdict-1",
+      clientData: { model },
+      setupLocals: ({ set }) => set(clickhouseKey, fakeClickHouse),
+    });
+
+    try {
+      const turn = await harness.sendMessage({
+        id: "u1",
+        role: "user",
+        parts: [{ type: "text", text: "Which London borough is the best buy?" }],
+      });
+      const chunks = JSON.stringify(turn.chunks);
+      expect(turn.chunks.filter((chunk) => chunk.type === "text-delta")).toHaveLength(0);
+      const comparisons = chunks.match(/"kind":"comparison"/g) ?? [];
+      expect(comparisons.length).toBeGreaterThanOrEqual(2);
+      const verdicts = chunks.match(/"kind":"verdict"/g) ?? [];
+      expect(verdicts).toHaveLength(1);
+      expect(chunks).toContain("Lambeth leads on price and on volume.");
     } finally {
       await harness.close();
     }

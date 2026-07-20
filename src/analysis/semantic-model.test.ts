@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planAnalysis, registerSemanticModel } from "./semantic-model";
+import { describeDataSource, planAnalysis, registerSemanticModel } from "./semantic-model";
 import type { SemanticModel } from "./types";
 
 describe("semantic planning", () => {
@@ -349,5 +349,39 @@ describe("semantic planning", () => {
     expect(plan.status).toBe("needs_clarification");
     if (plan.status !== "needs_clarification") return;
     expect(plan.ambiguities[0].recommended).toBe("median_price");
+  });
+});
+
+describe("describeDataSource", () => {
+  it("renders the full catalog as a table tile without running SQL", () => {
+    const spec = describeDataSource("uk-house-prices");
+    expect(spec.kind).toBe("table");
+    if (spec.kind !== "table") return;
+
+    expect(spec.title).toBe("UK House Price Paid — what you can ask");
+    // One row per governed concept: 2 measures + 6 dimensions.
+    expect(spec.rows.filter((row) => row.role === "measure")).toHaveLength(2);
+    expect(spec.rows.filter((row) => row.role === "dimension")).toHaveLength(6);
+
+    const median = spec.rows.find((row) => row.name === "Median sale price");
+    expect(median?.details).toContain("quantileTDigest median");
+    const saleDate = spec.rows.find((row) => row.name === "Sale date");
+    expect(saleDate?.details).toContain("day, month, quarter, year");
+    expect(saleDate?.details).toContain("1995-01-01 → 2026-05-29");
+    const district = spec.rows.find((row) => row.name === "District");
+    expect(district?.details).toContain("467 governed values, e.g.");
+
+    // The tile is a registry read: zero rows scanned, and the inspect drawer
+    // says so instead of showing SQL.
+    expect(spec.stats).toEqual({ rowsRead: 0, elapsedMs: 0 });
+    expect(spec.explanation.inspect.generatedSql).toContain("no SQL");
+    expect(spec.explanation.scope).toContain("≈31 million rows — one per completed sale");
+  });
+
+  it("returns a notice listing registered sources for an unknown id", () => {
+    const spec = describeDataSource("not-a-source");
+    expect(spec).toMatchObject({ kind: "notice", tone: "warning" });
+    if (spec.kind !== "notice") return;
+    expect(spec.suggestions).toContain("uk-house-prices");
   });
 });

@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { explainSemanticTerm, planAnalysis } from "../analysis/semantic-model";
+import { describeDataSource, explainSemanticTerm, planAnalysis } from "../analysis/semantic-model";
 import { runAnalysis, summarizeSpec } from "../analysis/pipeline";
 import type { AnalysisPlanResult } from "../analysis/types";
 import type { ViewSpec } from "../shared/view-spec";
@@ -210,6 +210,46 @@ export const explainSemantics = tool({
   }),
 });
 
+/**
+ * One line is all the model needs from the catalog tile: the governed names it
+ * can use in follow-up inspectAnalysis calls. The full tile (descriptions,
+ * examples, provenance) is rendering data and stays on the frontend.
+ */
+export function catalogSummary(spec: ViewSpec): string {
+  if (spec.kind !== "table") {
+    return spec.kind === "notice" ? `Catalog unavailable: ${spec.message}` : "Catalog tile shown.";
+  }
+  const names = (role: string) =>
+    spec.rows
+      .filter((row) => row.role === role)
+      .map((row) => row.name)
+      .join(", ");
+  return (
+    `Catalog tile shown: measures [${names("measure")}]; dimensions [${names("dimension")}]. ` +
+    `${spec.explanation.scope.join("; ")}.`
+  );
+}
+
+/**
+ * The "what can I ask?" channel. Reads the semantic model registry only — no
+ * SQL — so broad questions about the data get a catalog tile, not a refusal.
+ */
+export const describeData = tool({
+  description:
+    "Show a catalog tile of what the connected data can answer: every governed measure and " +
+    "dimension, the source, its row scale, covered date range, and last refresh. Use when the " +
+    "user asks what data is available, what they can ask, or where the data comes from. Never " +
+    "runs a query.",
+  inputSchema: z.object({
+    sourceId: z.string().default("uk-house-prices"),
+  }),
+  execute: async ({ sourceId }): Promise<ViewSpec> => describeDataSource(sourceId),
+  toModelOutput: ({ output }) => ({
+    type: "text",
+    value: catalogSummary(output as ViewSpec),
+  }),
+});
+
 /** The only final answer channel; loose assistant prose remains forbidden. */
 export const emitVerdict = tool({
   description:
@@ -232,6 +272,7 @@ export const emitVerdict = tool({
 });
 
 export const analysisTools = {
+  describeData,
   inspectAnalysis,
   requestClarification,
   renderAnalysis,

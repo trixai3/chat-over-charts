@@ -957,3 +957,98 @@ export function explainSemanticTerm(sourceId: string, term: string): ViewSpec {
     ],
   };
 }
+
+const CATALOG_EXAMPLE_VALUES = 3;
+
+function describeDimensionDetails(dimension: SemanticDimension, model: SemanticModel): string {
+  if (dimension.kind === "time") {
+    const grains = dimension.grains ? `Grains: ${Object.keys(dimension.grains).join(", ")}.` : "";
+    const range = model.availableRange
+      ? ` Available ${model.availableRange[0]} → ${model.availableRange[1]}.`
+      : "";
+    return `${grains}${range}`;
+  }
+  const examples = dimension.values
+    ?.slice(0, CATALOG_EXAMPLE_VALUES)
+    .join(", ");
+  return `${dimension.cardinality ?? dimension.values?.length ?? "?"} governed values${
+    examples ? `, e.g. ${examples}` : ""
+  }.`;
+}
+
+/**
+ * Answers "what data do you have / what can I ask?" as a catalog tile, read
+ * from the semantic model alone — no SQL runs. Everything on it (row scale,
+ * range, refresh) was snapshotted at onboarding, so it costs nothing and can
+ * never disagree with governance.
+ */
+export function describeDataSource(sourceId: string): ViewSpec {
+  const model = getSemanticModel(sourceId);
+  if (!model) {
+    return {
+      kind: "notice",
+      title: "Unknown data source",
+      message: `No semantic model is registered as “${sourceId}”.`,
+      tone: "warning",
+      suggestions: listSemanticModels().map((item) => item.id),
+    };
+  }
+
+  const measureRows = Object.values(model.measures).map((measure) => ({
+    name: measure.label,
+    role: "measure",
+    description: measure.description,
+    details: `Aggregation: ${measure.aggregation}.`,
+  }));
+  const dimensionRows = Object.values(model.dimensions).map((dimension) => ({
+    name: dimension.label,
+    role: "dimension",
+    description: dimension.description,
+    details: describeDimensionDetails(dimension, model),
+  }));
+
+  const scope = [
+    `Source: ${model.sourceSystem}`,
+    ...(model.rowScale ? [model.rowScale] : []),
+    ...(model.availableRange
+      ? [`Covers ${model.availableRange[0]} → ${model.availableRange[1]}`]
+      : []),
+    `Last refresh: ${model.lastRefresh}`,
+  ];
+
+  return {
+    kind: "table",
+    title: `${model.label} — what you can ask`,
+    columns: [
+      { key: "name", label: "Name" },
+      { key: "role", label: "Role" },
+      { key: "description", label: "Description" },
+      { key: "details", label: "Details" },
+    ],
+    rows: [...measureRows, ...dimensionRows],
+    // Honest zeros: the catalog is a registry read, so no rows were scanned.
+    stats: { rowsRead: 0, elapsedMs: 0 },
+    explanation: {
+      whatShown: "The governed catalog: every measure and dimension this source can answer with.",
+      calculation: "Read from the semantic model registry; no query ran.",
+      scope,
+      provenance: {
+        semanticModel: model.label,
+        source: model.sourceSystem,
+        lastRefresh: model.lastRefresh,
+        modelVersion: model.version,
+        measureVersions: Object.values(model.measures).map(
+          (measure) => `${measure.id}@${measure.version}`,
+        ),
+        figurePolicyVersion: model.figurePolicyVersion,
+      },
+      limitations: [
+        "Only questions expressible in these measures and dimensions are supported.",
+      ],
+      inspect: {
+        semanticQuery: JSON.stringify({ sourceId: model.id, catalog: true }, null, 2),
+        generatedSql: "-- no SQL: the catalog is read from the semantic model, not the database",
+      },
+    },
+  };
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planAnalysis } from "../analysis/semantic-model";
-import { planSummary } from "./tools";
+import { describeDataSource, planAnalysis } from "../analysis/semantic-model";
+import { catalogSummary, planSummary } from "./tools";
 
 describe("planSummary", () => {
   it("READY summary states the chosen figure and lists compatible alternatives", () => {
@@ -77,5 +77,22 @@ describe("planSummary", () => {
     // not the full summary, which legitimately lists median_price as a choice.
     const summary = planSummary(plan);
     expect(summary).not.toContain("right-skewed");
+  });
+});
+
+describe("catalogSummary", () => {
+  it("compresses the catalog tile to the governed names the model can plan with", () => {
+    const summary = catalogSummary(describeDataSource("uk-house-prices"));
+    // Bounded on purpose: names only — descriptions, examples, and provenance
+    // are rendering data and stay on the frontend tile.
+    expect(summary).toContain("measures [Median sale price, Transactions]");
+    expect(summary).toContain("dimensions [Sale date, County, District, Town or city,");
+    expect(summary).toContain("Covers 1995-01-01 → 2026-05-29");
+    expect(summary.length).toBeLessThan(500);
+  });
+
+  it("relays the notice for an unknown source", () => {
+    const summary = catalogSummary(describeDataSource("nope"));
+    expect(summary).toContain("Catalog unavailable:");
   });
 });
