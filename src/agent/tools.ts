@@ -240,9 +240,10 @@ export function catalogSummary(spec: ViewSpec): string {
 export const describeData = tool({
   description:
     "Show a catalog tile of what the connected data can answer: every governed measure and " +
-    "dimension, the source, its row scale, covered date range, and last refresh. Use when the " +
-    "user asks what data is available, what they can ask, or where the data comes from. Never " +
-    "runs a query.",
+    "dimension, the source, its row scale, covered date range, and last refresh. Use ONLY when " +
+    "the user asks what data is available, what they can ask, or where the data comes from. " +
+    "Never call it as a planning step before an analysis — inspectAnalysis resolves the user's " +
+    "wording itself. Never runs a query.",
   inputSchema: z.object({
     sourceId: z.string().default("uk-house-prices"),
   }),

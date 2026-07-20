@@ -50,6 +50,7 @@ const SYSTEM_PROMPT = [
   "If the user asks how a measure or value is defined or calculated, or about the dataset itself (its source, freshness, or why an aggregation was chosen), call explainSemantics with their term instead of running an analysis.",
   "Threshold questions ('districts where the median is over X') are ordinary filters: pass a filter whose field is the governed measure with operator gte, lte, or between.",
   "If the user asks what data is available, what they can ask, or where the data comes from, call describeData to show the catalog — never refuse these questions.",
+  "Only call describeData for those questions. For an analytical question go straight to inspectAnalysis — it resolves the user's own wording into governed IDs itself, so no catalog lookup is needed first.",
   "When the question needs a judgement (which is better, is it expensive, which should I pick), first render the supporting evidence — one or more renderAnalysis calls — then conclude with emitVerdict stating only facts from those render summaries.",
   "If the question is unrelated to the connected data or its figures, call no analysis tool; conclude with emitVerdict (tone neutral) saying only governed housing analytics are supported here.",
   "Finish every turn by calling emitVerdict exactly once.",
