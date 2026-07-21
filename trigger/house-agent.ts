@@ -3,7 +3,9 @@ import { streamText, stepCountIs, type LanguageModel, type PrepareStepFunction }
 import { z } from "zod";
 import { getModel } from "../src/shared/model";
 import { analysisTools } from "../src/agent/tools";
-import { bindSource } from "../src/agent/source-context";
+import { bindSource, getBoundSourceId } from "../src/agent/source-context";
+import { getSemanticModel } from "../src/analysis/semantic-model";
+import { sourcePromptCatalog } from "../src/agent/source-prompt";
 
 /**
  * The chat agent. In Trigger.dev's model this single task IS the backend — each
@@ -38,13 +40,17 @@ const tools = analysisTools;
 // runs, so the last step the loop will ever run has stepNumber === n - 1).
 const STEP_BUDGET = 15;
 
-const SYSTEM_PROMPT = [
+// Source-neutral: no measure, dimension, or unit vocabulary belongs here —
+// that lives in the bound source's semantic model and reaches the model only
+// via sourcePromptCatalog (Slice 4). Mechanics (the tool loop, clarification
+// protocol, figure-selection cues) are the only things fixed at this layer.
+const GENERIC_SYSTEM_PROMPT = [
   "You turn analytical questions into governed figures.",
   "You never write prose. The user sees tiles, not chat text.",
   "Never write SQL, table names, joins, or ViewSpecs.",
   "For each request call inspectAnalysis first using semantic terms from the question.",
-  "Price wording states an intent — compose the measure as {field:'price', aggregation:...}: typical/overall level means median, entry/affordable end means p25, upper quartile means p75, top/high end/luxury means p90, the single record sale means max. Compose from this menu instead of asking a clarification the menu already answers; averages are not offered because medians are the governed centre for skewed prices.",
-  "Place names resolve against live reference data: when inspectAnalysis reports a place matches several locations, relay those options with requestClarification verbatim — never pick one yourself, not even the largest.",
+  "Use the user's own measure wording; inspectAnalysis resolves it to a governed measure, and you may compose {field, aggregation} from a value field's vetted menu.",
+  "When inspectAnalysis reports that a value matches several governed members, relay those options with requestClarification verbatim — never pick one yourself, not even the largest.",
   "If it reports NEEDS_CLARIFICATION, call requestClarification relaying its options verbatim.",
   "Never invent clarification questions of your own. When a clarification option's description tells you the exact next call, make that call directly.",
   "If it reports READY, call renderAnalysis using the exact resolved semantic IDs.",
@@ -53,14 +59,30 @@ const SYSTEM_PROMPT = [
   "When the user names a chart style, pass it as preferredFigure; the READY summary lists the figure plus compatible alternatives — only switch figures by re-calling renderAnalysis with a preferredFigure from that list.",
   "Map phrasing to figures: 'share of'/'proportion'/'breakdown' suggests pie, 'correlation'/'X vs Y' suggests scatter, 'spread'/'distribution' of values means analysisType distribution, 'over time' means trend; when nothing is implied, omit preferredFigure.",
   "If the user asks how a measure or value is defined or calculated, or about the dataset itself (its source, freshness, or why an aggregation was chosen), call explainSemantics with their term instead of running an analysis.",
-  "Threshold questions ('districts where the median is over X') are ordinary filters: pass a filter whose field is the governed measure with operator gte, lte, or between.",
+  "Threshold questions (a measure compared to a number, e.g. 'where the value is over X') are ordinary filters: pass a filter whose field is the governed measure with operator gte, lte, or between.",
   "If the user asks what data is available, what they can ask, or where the data comes from, call describeData to show the catalog — never refuse these questions.",
   "Only call describeData for those questions. For an analytical question go straight to inspectAnalysis — it resolves the user's own wording into governed IDs itself, so no catalog lookup is needed first.",
   "When the question needs a judgement (which is better, is it expensive, which should I pick), first render the supporting evidence — one or more renderAnalysis calls — then conclude with emitVerdict stating only facts from those render summaries.",
-  "Budget questions ('can I afford X with £N?') are judgements about WHERE the budget works: render a category_comparison of the median by district (scoped to the asked area), then a verdict counting how many districts the budget covers. A whole-area distribution or single KPI does not answer affordability.",
-  "If the question is unrelated to the connected data or its figures, call no analysis tool; conclude with emitVerdict (tone neutral) saying only governed housing analytics are supported here.",
+  "If the question is unrelated to the connected data or its figures, call no analysis tool; conclude with emitVerdict (tone neutral) saying only governed analytics for the connected source are supported here.",
   "Finish every turn by calling emitVerdict exactly once.",
 ].join(" ");
+
+/**
+ * The generic block plus the bound source's generated vocabulary catalog
+ * (measure synonyms, distribution notes, member-resolution note, pack
+ * hints — see source-prompt.ts). Falls back to the generic block alone if no
+ * source is bound yet or the id doesn't resolve, rather than crash the run.
+ */
+function buildSystemPrompt(): string {
+  try {
+    const model = getSemanticModel(getBoundSourceId());
+    if (model) return `${GENERIC_SYSTEM_PROMPT} ${sourcePromptCatalog(model)}`;
+  } catch {
+    // No source bound yet (e.g. multiple sources registered, none chosen) —
+    // fall through to the generic prompt rather than fail the run.
+  }
+  return GENERIC_SYSTEM_PROMPT;
+}
 
 export const houseAgent = chat
   .withClientData({ schema: z.custom<ClientData>() })
@@ -109,7 +131,7 @@ export const houseAgent = chat
         // The injection seam: tests pass a mock; prod falls back to the env
         // switch in getModel().
         model: clientData?.model ?? getModel(),
-        system: SYSTEM_PROMPT,
+        system: buildSystemPrompt(),
         messages,
         abortSignal: signal,
         stopWhen: stepCountIs(STEP_BUDGET),

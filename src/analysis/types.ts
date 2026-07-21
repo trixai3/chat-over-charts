@@ -267,6 +267,13 @@ export type SemanticModel = {
   dimensions: Record<string, SemanticDimension>;
   /** Leaf dimensions resolved through a live lookup instead of a snapshotted domain. */
   memberResolvers?: MemberResolver[];
+  /**
+   * Source-specific reasoning guidance for the system prompt; never contains
+   * SQL/table names. Appended verbatim by sourcePromptCatalog — the pack may
+   * use its own domain vocabulary here, since this text never enters core
+   * agent code, only the generated per-source catalog.
+   */
+  promptHints?: string[];
   defaults: {
     measure: string;
     timeDimension?: string;

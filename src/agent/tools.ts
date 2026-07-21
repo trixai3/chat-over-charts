@@ -20,17 +20,17 @@ export const analysisDraftSchema = z.object({
     .enum(["single_value", "trend", "category_comparison", "detail", "distribution"])
     .optional()
     .describe(
-      "The analytical intent. single_value: one headline number ('what is the median in X'). " +
-        "trend: change over ordered time ('how did prices change'). category_comparison: rank or " +
-        "compare groups ('which district is highest'). detail: inspect exact rows. distribution: " +
-        "how values spread within one population ('what do prices look like in X', 'price histogram').",
+      "The analytical intent. single_value: one headline number ('what is the value for X'). " +
+        "trend: change over ordered time ('how did it change'). category_comparison: rank or " +
+        "compare groups ('which group is highest'). detail: inspect exact rows. distribution: " +
+        "how values spread within one population ('what does it look like in X', 'show a histogram').",
     ),
   measures: z
     .array(
       z.union([
         z.string(),
         z.object({
-          field: z.string().describe("A governed value field, e.g. 'price'."),
+          field: z.string().describe("A governed value field, resolved against its own synonyms."),
           aggregation: z.enum(["median", "p25", "p75", "p90", "max"]),
         }),
       ]),
@@ -39,13 +39,11 @@ export const analysisDraftSchema = z.object({
     .describe(
       "Each entry is either the user's wording (a string, resolved against governed measures and " +
         "synonyms) or a composed governed measure {field, aggregation}. When wording names an intent " +
-        "rather than a measure, compose it from the vetted menu of field 'price' (right-skewed, so " +
-        "no averages): median = the typical level and the default; p25 = the entry/affordable end; " +
-        "p75 = the upper quartile; p90 = the top of the market/high end; max = the single highest " +
-        "recorded sale (outlier-sensitive — only for 'record'/'most expensive ever' questions). " +
-        "For counts use the string 'transactions'. Never SQL expressions, and never answer one " +
-        "intent with a different one (a 'top price' question is never answered with the median) — " +
-        "the tile label always discloses the aggregation used.",
+        "rather than a registered measure, compose it from that value field's own vetted aggregation " +
+        "menu instead of asking a clarification the menu already answers — the system prompt's " +
+        "per-source catalog lists each field's menu and which wording maps to which aggregation. " +
+        "Never SQL expressions, and never answer one intent with a different one — the tile label " +
+        "always discloses the aggregation used.",
     ),
   dimensions: z
     .array(
@@ -61,10 +59,10 @@ export const analysisDraftSchema = z.object({
         field: z
           .string()
           .describe(
-            "Best-guess field. For place names any guess is fine — values are resolved " +
-              "against governed reference data, so never ask the user which field a place is. " +
-              "A governed measure is also valid here for threshold questions ('districts where " +
-              "the median is over X') with operator gte, lte, or between.",
+            "Best-guess field. For a value that names a governed member, any field guess is fine " +
+              "— values resolve against governed reference data, so never ask the user which field " +
+              "a value belongs to. A governed measure is also valid here for threshold questions " +
+              "('where the value is over X') with operator gte, lte, or between.",
           ),
         operator: z.enum(["equals", "in", "between", "gte", "lte"]),
         value: filterValue,
@@ -82,9 +80,9 @@ export const analysisDraftSchema = z.object({
         "omit — the chart policy picks a default and reports compatible alternatives. When to use " +
         "each: kpi shows one isolated value; timeseries (line) shows continuous change over time; " +
         "area shows shifts in additive composition over time; comparison (bar) compares categories; " +
-        "pie shows proportional shares of an additive whole (counts, never medians); scatter shows " +
-        "correlation between two measures; table shows exact values. A distribution figure comes " +
-        "from analysisType 'distribution', never from this field.",
+        "pie shows proportional shares of an additive whole (counts, never non-additive aggregates " +
+        "like medians); scatter shows correlation between two measures; table shows exact values. " +
+        "A distribution figure comes from analysisType 'distribution', never from this field.",
     ),
   limit: z.number().int().min(1).max(1000).optional(),
   seriesSelection: z

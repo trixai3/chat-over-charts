@@ -198,4 +198,13 @@ export const ukHousePrices: SemanticModel = {
   memberResolvers: [
     { dimensionId: "locality", hierarchy: ["district", "county"], countLabel: "sales" },
   ],
+  // Domain-specific question recipes core agent code never hardcodes (Slice
+  // 4: the static prompt is source-neutral, so this reasoning travels with
+  // the pack instead).
+  promptHints: [
+    "Affordability or budget questions ('can I afford X with £N?') are judgements about WHERE a " +
+      "budget works: render a category_comparison of the median by district scoped to the asked " +
+      "area, then a verdict counting how many districts the budget covers — a whole-area " +
+      "distribution or single KPI does not answer affordability.",
+  ],
 };
