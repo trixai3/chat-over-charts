@@ -42,6 +42,29 @@ V2-1 至 V2-7 的可用内核约 **7–10 个开发日**。完成 V2-8 后，一
 单事实关系应能在 **0.5–1.5 天**接入；需要 enrichment、隐私治理或复杂指标时预计
 **2–5 天**。这些是规划估算，不是交付承诺。
 
+### 当前执行焦点：多源支线（2026-07-21）
+
+目标是「每语义层支持多数据源」。这是 V2 的一个**子集**，不是全部重写：
+
+- **纳入支线（core）：** V2-5（房价迁入 Source Pack）、V2-6（通用 member resolution）、
+  V2-1 的 **source-binding 部分**（删除 model-facing `sourceId`，session 绑定已授权 source）、
+  V2-7（第二个真实 Source Pack）。第二份测试数据由使用者另行提供。
+- **随支线附带：** V2-2 中「服务器生成 clarification spec」的最小部分——它与 V2-6 的通用
+  resolver 同源，无法干净拆开。
+- **暂缓（独立 hardening pass）：** sealed `planId`/PlanStore、Figure Registry（V2-3）、
+  DecisionEvidence verdict（V2-4）。它们与源数量正交，不阻塞第二源。
+- **理由：** source binding 既是多源基建，也是防「同名指标跨源串线」的 hardening；其余
+  hardening 随源增多更有价值，但可在多源跑通后独立补上。intent grounding（§8.2）在两个
+  同名指标的源共存后值得提前。
+
+**支线切片顺序**（每片端到端且带测试）：
+
+1. Source Pack registry + 房价 model 迁入 `src/analysis/sources/`（**零行为变化**）。✅ 完成并验证
+2. Source binding（删除 `sourceId`，`onBoot`/`chat.local` 注入）。⬜
+3. 通用 member resolution（声明式 resolver 替换 `place-resolver.ts`）+ 最小 clarification spec。⬜
+4. 领域解耦 prompt / measure menu。⬜
+5. 第二个真实 Source Pack 全链路证明。⬜
+
 ### V2-0 — 固化边界 ✅
 
 **交付：**

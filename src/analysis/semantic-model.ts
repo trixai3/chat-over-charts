@@ -1,5 +1,5 @@
 import type { ViewSpec } from "../shared/view-spec";
-import { ukHousePrices } from "./models/uk-house-prices";
+import { SOURCES } from "./sources";
 import type {
   AnalysisDraft,
   AnalysisField,
@@ -14,9 +14,9 @@ import type {
 import { DEFAULT_LINE_SERIES, MAX_LINE_SERIES, selectProvisionalFigure } from "./chart-policy";
 import { composedLabel, resolveComposedMeasure } from "./measure-grammar";
 
-const MODELS: Record<string, SemanticModel> = {
-  [ukHousePrices.id]: ukHousePrices,
-};
+const MODELS: Record<string, SemanticModel> = Object.fromEntries(
+  SOURCES.map((source) => [source.id, source]),
+);
 
 export function getSemanticModel(id: string): SemanticModel | undefined {
   return MODELS[id];

@@ -1,6 +1,6 @@
-import type { SemanticModel, SemanticValueField } from "../types";
-import { buildMeasures } from "../measure-grammar";
-import { ukHousePriceDimensionValues } from "./uk-house-prices.values";
+import type { SemanticModel, SemanticValueField } from "../../types";
+import { buildMeasures } from "../../measure-grammar";
+import { ukHousePriceDimensionValues } from "./values";
 
 /**
  * The price grammar: one raw column plus the aggregations that are honest for
