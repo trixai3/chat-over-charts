@@ -60,7 +60,7 @@ V2-1 至 V2-7 的可用内核约 **7–10 个开发日**。完成 V2-8 后，一
 **支线切片顺序**（每片端到端且带测试）：
 
 1. Source Pack registry + 房价 model 迁入 `src/analysis/sources/`（**零行为变化**）。✅ 完成并验证
-2. Source binding（删除 `sourceId`，`onBoot`/`chat.local` 注入）。⬜
+2. Source binding（删除 `sourceId`，`onBoot` + `locals` 注入）。✅ 完成并验证
 3. 通用 member resolution（声明式 resolver 替换 `place-resolver.ts`）+ 最小 clarification spec。⬜
 4. 领域解耦 prompt / measure menu。⬜
 5. 第二个真实 Source Pack 全链路证明。⬜

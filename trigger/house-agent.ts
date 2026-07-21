@@ -3,6 +3,7 @@ import { streamText, stepCountIs, type LanguageModel, type PrepareStepFunction }
 import { z } from "zod";
 import { getModel } from "../src/shared/model";
 import { analysisTools } from "../src/agent/tools";
+import { bindSource } from "../src/agent/source-context";
 
 /**
  * The chat agent. In Trigger.dev's model this single task IS the backend — each
@@ -15,14 +16,16 @@ import { analysisTools } from "../src/agent/tools";
  */
 
 /**
- * Wire data from the frontend. The only field today is an optional `model`,
- * which is how tests inject a `MockLanguageModelV3` (see house-agent.test.ts).
- * In production the frontend sends nothing here and we fall back to getModel().
+ * Wire data from the frontend. `model` is how tests inject a
+ * `MockLanguageModelV3` (see house-agent.test.ts); in production the frontend
+ * sends nothing here and we fall back to getModel(). `sourceId` is how the
+ * server/UI binds which source this session analyzes — the model never sees
+ * or sets this field (AGENTS.md: the model does not choose the source).
  * A `LanguageModel` isn't JSON, so we use `z.custom` rather than a real schema —
  * this object never crosses the network in prod, it only exists in-process
  * during tests.
  */
-type ClientData = { model?: LanguageModel };
+type ClientData = { model?: LanguageModel; sourceId?: string };
 
 // Declared once here, read back typed off the run() payload. Declaring on the
 // config (not just streamText) is what makes each tool's toModelOutput survive
@@ -64,6 +67,11 @@ export const houseAgent = chat
   .agent({
     id: "house-agent",
     tools,
+    // A session that supplies no sourceId stays unbound and falls back to the
+    // sole registered source via getBoundSourceId (single-source deployment).
+    onBoot: async ({ clientData }) => {
+      if (clientData?.sourceId) bindSource(clientData.sourceId);
+    },
     run: async ({ messages, tools, clientData, signal }) => {
       // Spread first so our explicit fields below win — this also wires up
       // compaction/steering via prepareStep (backend.mdx warning).

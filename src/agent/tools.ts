@@ -5,6 +5,7 @@ import { planWithPlaceResolution } from "../analysis/place-resolver";
 import { runAnalysis, summarizeSpec } from "../analysis/pipeline";
 import type { AnalysisPlanResult } from "../analysis/types";
 import type { ViewSpec } from "../shared/view-spec";
+import { getBoundSourceId } from "./source-context";
 
 const filterValue = z.union([
   z.string(),
@@ -15,7 +16,6 @@ const filterValue = z.union([
 
 export const analysisDraftSchema = z.object({
   question: z.string().describe("The user's original analytical question."),
-  sourceId: z.string().default("uk-house-prices"),
   analysisType: z
     .enum(["single_value", "trend", "category_comparison", "detail", "distribution"])
     .optional()
@@ -139,7 +139,8 @@ export const inspectAnalysis = tool({
     "Resolve an analytical request through the selected semantic model and choose a provisional figure. " +
     "Always call this before renderAnalysis. It returns governed IDs or supported clarification choices.",
   inputSchema: analysisDraftSchema,
-  execute: async (draft): Promise<AnalysisPlanResult> => planWithPlaceResolution(draft),
+  execute: async (draft): Promise<AnalysisPlanResult> =>
+    planWithPlaceResolution({ ...draft, sourceId: getBoundSourceId() }),
   toModelOutput: ({ output }) => ({
     type: "text",
     value: planSummary(output as AnalysisPlanResult),
@@ -178,7 +179,7 @@ export const renderAnalysis = tool({
     "The application compiles SQL, validates the dataset, selects the chart, and builds the ViewSpec.",
   inputSchema: analysisDraftSchema,
   execute: async (draft): Promise<ViewSpec> => {
-    const plan = planAnalysis(draft);
+    const plan = planAnalysis({ ...draft, sourceId: getBoundSourceId() });
     if (plan.status === "needs_clarification") {
       return {
         kind: "notice",
@@ -216,10 +217,9 @@ export const explainSemantics = tool({
     "only the semantic layer. Use when the user asks how a value was calculated or what a term " +
     "means. Never runs a query. Do not use for questions unrelated to the connected data.",
   inputSchema: z.object({
-    sourceId: z.string().default("uk-house-prices"),
     term: z.string().describe("The measure or dimension the user asked about, in their words."),
   }),
-  execute: async ({ sourceId, term }): Promise<ViewSpec> => explainSemanticTerm(sourceId, term),
+  execute: async ({ term }): Promise<ViewSpec> => explainSemanticTerm(getBoundSourceId(), term),
   toModelOutput: ({ output }) => ({
     type: "text",
     value:
@@ -260,10 +260,8 @@ export const describeData = tool({
     "the user asks what data is available, what they can ask, or where the data comes from. " +
     "Never call it as a planning step before an analysis — inspectAnalysis resolves the user's " +
     "wording itself. Never runs a query.",
-  inputSchema: z.object({
-    sourceId: z.string().default("uk-house-prices"),
-  }),
-  execute: async ({ sourceId }): Promise<ViewSpec> => describeDataSource(sourceId),
+  inputSchema: z.object({}),
+  execute: async (): Promise<ViewSpec> => describeDataSource(getBoundSourceId()),
   toModelOutput: ({ output }) => ({
     type: "text",
     value: catalogSummary(output as ViewSpec),
