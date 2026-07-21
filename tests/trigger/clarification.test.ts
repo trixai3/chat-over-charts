@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
-import { houseAgent } from "./house-agent";
+import { houseAgent } from "../../trigger/house-agent";
 
 function finish(): LanguageModelV3StreamPart {
   return {

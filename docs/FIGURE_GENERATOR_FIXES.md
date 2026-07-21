@@ -180,10 +180,10 @@ server must run from the active worktree; verify with `lsof -p <pid> | grep cwd`
 
 ## Verification
 
-- New offline tests: `src/analysis/temporal-guards.test.ts` (silent default, lossy average,
+- New offline tests: `tests/analysis/temporal-guards.test.ts` (silent default, lossy average,
   window×time, change-without-time, pre-query series scope, top-N + window SQL compilation,
   null-first-period handling through the pipeline).
-- New live test in `src/analysis/live-uk-house-prices.test.ts` replays the original failing
+- New live test in `tests/analysis/live-uk-house-prices.test.ts` replays the original failing
   question end-to-end against ClickHouse and asserts a multi-series, non-zero result.
 - Existing suite unchanged in behaviour: the window measures remain valid in comparison/KPI
   contexts, and no prior test relied on the removed silent default.

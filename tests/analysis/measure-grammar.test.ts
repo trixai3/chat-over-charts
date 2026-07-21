@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildMeasures } from "./measure-grammar";
-import { planAnalysis } from "./semantic-model";
-import { ukHousePrices } from "./sources/england-wales-house-prices/model";
+import { buildMeasures } from "../../src/analysis/measure-grammar";
+import { planAnalysis } from "../../src/analysis/semantic-model";
+import { ukHousePrices } from "../../src/analysis/sources/england-wales-house-prices/model";
 
 describe("measure grammar", () => {
   const price = ukHousePrices.valueFields!.price;

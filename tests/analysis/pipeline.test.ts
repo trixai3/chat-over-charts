@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { planAnalysis } from "./semantic-model";
-import { runAnalysis, summarizeSpec } from "./pipeline";
-import type { SourceAdapter } from "./types";
+import { planAnalysis } from "../../src/analysis/semantic-model";
+import { runAnalysis, summarizeSpec } from "../../src/analysis/pipeline";
+import type { SourceAdapter } from "../../src/analysis/types";
 
 const stats = { rowsRead: 4030464, bytesRead: 120000000, elapsedMs: 45, queryId: "uk-test" };
 

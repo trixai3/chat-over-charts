@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClickHouseClient } from "@clickhouse/client";
-import { ClickHouseAdapter, compileClickHouseQuery } from "./clickhouse-adapter";
-import { getSemanticModel, planAnalysis } from "./semantic-model";
+import { ClickHouseAdapter, compileClickHouseQuery } from "../../src/analysis/clickhouse-adapter";
+import { getSemanticModel, planAnalysis } from "../../src/analysis/semantic-model";
 
 function londonComparisonPlan() {
   const plan = planAnalysis({

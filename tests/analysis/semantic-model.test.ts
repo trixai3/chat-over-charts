@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { describeDataSource, planAnalysis, registerSemanticModel } from "./semantic-model";
-import type { SemanticModel } from "./types";
+import { describeDataSource, planAnalysis, registerSemanticModel } from "../../src/analysis/semantic-model";
+import type { SemanticModel } from "../../src/analysis/types";
 
 describe("semantic planning", () => {
   it("resolves UK house-price synonyms into governed IDs", () => {

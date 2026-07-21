@@ -73,7 +73,7 @@ You need a ClickHouse service, a [Trigger.dev](https://trigger.dev) project, and
 
 The engine is source-agnostic: a data source is a **Source Pack** — one declarative
 `SemanticModel` object. Adding one touches no agent, planner, compiler, chart, or renderer code
-(proven by [`src/analysis/second-source.test.ts`](src/analysis/second-source.test.ts), which runs a
+(proven by [`tests/analysis/second-source.test.ts`](tests/analysis/second-source.test.ts), which runs a
 structurally different transit dataset through the whole engine with zero production changes).
 
 **1. Write the pack** — `src/analysis/sources/<your-source>/model.ts`, exporting a `SemanticModel`

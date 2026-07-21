@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explainSemanticTerm } from "./semantic-model";
+import { explainSemanticTerm } from "../../src/analysis/semantic-model";
 
 // "How did you calculate X?" answers come from the semantic layer alone — no
 // SQL runs, and unknown terms are refused with the governed vocabulary.

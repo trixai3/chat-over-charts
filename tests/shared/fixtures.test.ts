@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ALL_FIXTURES, BROKEN_FIXTURE } from "./fixtures";
-import { ViewSpec } from "./view-spec";
+import { ALL_FIXTURES, BROKEN_FIXTURE } from "../../src/shared/fixtures";
+import { ViewSpec } from "../../src/shared/view-spec";
 
 describe("ViewSpec gallery fixtures", () => {
   it("keeps one valid real-data fixture for every registered renderer", () => {

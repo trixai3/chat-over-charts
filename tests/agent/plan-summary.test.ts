@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { describeDataSource, planAnalysis } from "../analysis/semantic-model";
-import { catalogSummary, planSummary } from "./tools";
+import { describeDataSource, planAnalysis } from "../../src/analysis/semantic-model";
+import { catalogSummary, planSummary } from "../../src/agent/tools";
 
 describe("planSummary", () => {
   it("READY summary states the chosen figure and lists compatible alternatives", () => {

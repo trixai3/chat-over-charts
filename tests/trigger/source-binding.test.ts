@@ -6,10 +6,10 @@ import { simulateReadableStream } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import type { ClickHouseClient } from "@clickhouse/client";
-import { houseAgent } from "./house-agent";
-import { clickhouseKey } from "../src/shared/clickhouse";
-import { registerSemanticModel } from "../src/analysis/semantic-model";
-import type { SemanticModel } from "../src/analysis/types";
+import { houseAgent } from "../../trigger/house-agent";
+import { clickhouseKey } from "../../src/shared/clickhouse";
+import { registerSemanticModel } from "../../src/analysis/semantic-model";
+import type { SemanticModel } from "../../src/analysis/types";
 
 const supportTickets: SemanticModel = {
   id: "support-tickets-binding",

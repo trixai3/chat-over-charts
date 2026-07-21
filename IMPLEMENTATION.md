@@ -384,7 +384,7 @@ npm run source:doctor -- support-tickets
    - ✅ 指标注册表 `src/agent/metrics.ts`(中位数 `quantileTDigestIf`)+ 薄版地理(county→district)
    - ✅ SQL 已对真数据验证:Barking +16.9% 等,扫 4.03M 行 /355ms(county 剪枝生效)
    - ✅ `execute` 返回 ComparisonSpec;**`toModelOutput` 压成一行**(无 spec 字段名)
-6. ✅ **turn-2 回归测试** `trigger/no-leak.test.ts` — 连问三轮,断言 turn 2/3 prompt 无 ViewSpec JSON
+6. ✅ **turn-2 回归测试** `tests/trigger/no-leak.test.ts` — 连问三轮,断言 turn 2/3 prompt 无 ViewSpec JSON
    - ✅ **必过、有牙**:临时让 toModelOutput 泄漏 → 测试立刻变红(变异测试验证过)
    - ✅ `mockChatAgent` + `setupLocals` 假 CH,完全离线
 

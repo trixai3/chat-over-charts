@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { compileClickHouseQuery } from "./clickhouse-adapter";
-import { runAnalysis } from "./pipeline";
-import { getSemanticModel, planAnalysis } from "./semantic-model";
-import type { SourceAdapter } from "./types";
+import { compileClickHouseQuery } from "../../src/analysis/clickhouse-adapter";
+import { runAnalysis } from "../../src/analysis/pipeline";
+import { getSemanticModel, planAnalysis } from "../../src/analysis/semantic-model";
+import type { SourceAdapter } from "../../src/analysis/types";
 
 const stats = { rowsRead: 1000, bytesRead: 1000, elapsedMs: 5, queryId: "guard-test" };
 

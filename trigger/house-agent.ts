@@ -19,7 +19,7 @@ import { sourcePromptCatalog } from "../src/agent/source-prompt";
 
 /**
  * Wire data from the frontend. `model` is how tests inject a
- * `MockLanguageModelV3` (see house-agent.test.ts); in production the frontend
+ * `MockLanguageModelV3` (see tests/trigger/house-agent.test.ts); in production the frontend
  * sends nothing here and we fall back to getModel(). `sourceId` is how the
  * server/UI binds which source this session analyzes — the model never sees
  * or sets this field (AGENTS.md: the model does not choose the source).

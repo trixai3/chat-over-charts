@@ -182,7 +182,7 @@ Final acceptance results on 19 July 2026:
 - `git diff --check`: passed;
 - invariant audit: no API routes, no chart/domain-specific production tools, and one production `ViewSpec.safeParse` boundary.
 
-An opt-in live test exists at `src/analysis/live-uk-house-prices.test.ts`. It skips without ClickHouse credentials. The managed implementation environment denied external ClickHouse Cloud access after a sandbox DNS failure, so the live path was not used as completion evidence; offline tests and the production build are the authoritative evidence for this branch.
+An opt-in live test exists at `tests/analysis/live-uk-house-prices.test.ts`. It skips without ClickHouse credentials. The managed implementation environment denied external ClickHouse Cloud access after a sandbox DNS failure, so the live path was not used as completion evidence; offline tests and the production build are the authoritative evidence for this branch.
 
 ## 7. Deviation log
 

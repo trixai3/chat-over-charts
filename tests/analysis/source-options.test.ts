@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { listSourceOptions } from "./source-options";
-import { registerSemanticModel } from "./semantic-model";
-import type { SemanticModel } from "./types";
+import { listSourceOptions } from "../../src/analysis/source-options";
+import { registerSemanticModel } from "../../src/analysis/semantic-model";
+import type { SemanticModel } from "../../src/analysis/types";
 
 describe("listSourceOptions", () => {
   it("includes the housing entry with its exact example questions", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planAnalysis } from "./semantic-model";
-import { runAnalysis } from "./pipeline";
+import { planAnalysis } from "../../src/analysis/semantic-model";
+import { runAnalysis } from "../../src/analysis/pipeline";
 
 const hasCredentials = Boolean(
   process.env.CLICKHOUSE_URL &&

@@ -5,8 +5,8 @@ import { simulateReadableStream } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import type { ClickHouseClient } from "@clickhouse/client";
-import { houseAgent } from "./house-agent";
-import { clickhouseKey } from "../src/shared/clickhouse";
+import { houseAgent } from "../../trigger/house-agent";
+import { clickhouseKey } from "../../src/shared/clickhouse";
 
 const request = {
   question: "Which London borough has the highest median price?",

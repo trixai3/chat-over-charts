@@ -2,9 +2,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    // Agent tests live next to the agent in trigger/; shared-code tests in src/.
-    // Trigger's own build excludes *.test.ts, so these files never ship.
-    include: ["trigger/**/*.test.ts", "src/**/*.test.ts"],
+    // tests/ mirrors the source layout: tests/analysis ↔ src/analysis,
+    // tests/trigger ↔ trigger/, etc. Nothing here ships in any build.
+    include: ["tests/**/*.test.ts"],
     environment: "node",
   },
 });

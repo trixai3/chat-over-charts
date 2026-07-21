@@ -6,9 +6,9 @@ import { simulateReadableStream } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import type { ClickHouseClient } from "@clickhouse/client";
-import { houseAgent } from "./house-agent";
-import { clickhouseKey } from "../src/shared/clickhouse";
-import { planAnalysis } from "../src/analysis/semantic-model";
+import { houseAgent } from "../../trigger/house-agent";
+import { clickhouseKey } from "../../src/shared/clickhouse";
+import { planAnalysis } from "../../src/analysis/semantic-model";
 
 /**
  * Coverage for the figure kinds and hybrid-resolver behaviour that landed

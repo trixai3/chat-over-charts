@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planAnalysis } from "./semantic-model";
+import { planAnalysis } from "../../src/analysis/semantic-model";
 
 // Value-level filter governance: the field resolver alone let "london" compile
 // to county = 'LONDON' (zero rows — the stored value is GREATER LONDON).

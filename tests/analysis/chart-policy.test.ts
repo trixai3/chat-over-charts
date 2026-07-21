@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { finalizeFigure } from "./chart-policy";
-import { planAnalysis } from "./semantic-model";
+import { finalizeFigure } from "../../src/analysis/chart-policy";
+import { planAnalysis } from "../../src/analysis/semantic-model";
 
 describe("governed chart policy", () => {
   it.each([

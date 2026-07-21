@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { planWithMemberResolution, resolveMember } from "./member-resolver";
-import { getSemanticModel } from "./semantic-model";
-import type { AnalysisDraft, CompiledQuery, SourceAdapter } from "./types";
+import { planWithMemberResolution, resolveMember } from "../../src/analysis/member-resolver";
+import { getSemanticModel } from "../../src/analysis/semantic-model";
+import type { AnalysisDraft, CompiledQuery, SourceAdapter } from "../../src/analysis/types";
 
 const model = getSemanticModel("uk-house-prices")!;
 const localityResolver = model.memberResolvers![0]!;

@@ -10,18 +10,18 @@
 // a residual leak in the spine — a finding to report, not something to
 // quietly patch here.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { planAnalysis, registerSemanticModel } from "./semantic-model";
-import { runAnalysis } from "./pipeline";
-import { planWithMemberResolution } from "./member-resolver";
-import { buildMeasures } from "./measure-grammar";
-import { sourcePromptCatalog } from "../agent/source-prompt";
+import { planAnalysis, registerSemanticModel } from "../../src/analysis/semantic-model";
+import { runAnalysis } from "../../src/analysis/pipeline";
+import { planWithMemberResolution } from "../../src/analysis/member-resolver";
+import { buildMeasures } from "../../src/analysis/measure-grammar";
+import { sourcePromptCatalog } from "../../src/agent/source-prompt";
 import type {
   AnalysisDraft,
   CompiledQuery,
   SemanticModel,
   SemanticValueField,
   SourceAdapter,
-} from "./types";
+} from "../../src/analysis/types";
 
 const stats = { rowsRead: 12000, bytesRead: 900000, elapsedMs: 12, queryId: "transit-test" };
 

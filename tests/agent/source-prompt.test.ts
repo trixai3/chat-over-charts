@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getSemanticModel } from "../analysis/semantic-model";
-import { sourcePromptCatalog } from "./source-prompt";
+import { getSemanticModel } from "../../src/analysis/semantic-model";
+import { sourcePromptCatalog } from "../../src/agent/source-prompt";
 
 describe("sourcePromptCatalog", () => {
   const model = getSemanticModel("uk-house-prices")!;
