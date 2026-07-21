@@ -1,12 +1,260 @@
 # 实现计划 —— 完整清单与进度
 
+> **当前方向（2026-07-20）：Architecture V2。** 本页顶部是接下来工作的单一真相源；
+> [`docs/architecture-v2.md`](docs/architecture-v2.md) 记录完整边界与理由。下面的 V1 部分
+> 保留已有实现和 hackathon 历史，不再代表未来扩展顺序。
+
+**图例：** ✅ 已完成并验证 · 🔨 进行中 · ⬜ 未开始 · 🟡 有证据后才做
+
+---
+
+## Architecture V2 — 实施总则
+
+目标不是一次重写。每个切片都必须满足四条规则：
+
+1. 结束时有一条真实的端到端路径，而不是只完成抽象层。
+2. 现有 UK house-price 行为和 wire format 默认不变。
+3. 未通过本切片的 failure-path 测试，不进入下一片。
+4. 新 source 和新 figure 分开证明；不要在同一个 PR 同时改两条扩展轴。
+
+**目标验收句：**
+
+> 新 source 只增加一个受审查的 Source Pack；新图表只增加 Figure Definition、ViewSpec
+> variant、renderer 和 fixture。两者仍共用同一个 planner、ClickHouse compiler、validator
+> 和 tool loop，模型没有 SQL、ViewSpec、source 切换或计划改写通道。
+
+### V2 进度总览
+
+| 切片 | 产出 | 状态 | 预计 |
+|---|---|---:|---:|
+| V2-0 | 架构、威胁模型、验收标准 | ✅ | 0.5 天 |
+| V2-1 | 服务器 canonical context + 不可篡改 `planId` | ⬜ | 1 天 |
+| V2-2 | 可信 clarification ID/spec + HITL 恢复 | ⬜ | 1 天 |
+| V2-3 | 静态 Figure Registry + 第一个新图 | ⬜ | 1–1.5 天 |
+| V2-4 | 有界 `DecisionEvidence` + evidence-bound verdict | ⬜ | 0.5–1 天 |
+| V2-5 | 房价迁入 Source Pack，无行为变化 | ⬜ | 1–1.5 天 |
+| V2-6 | 通用 member resolution + semantic drill | ⬜ | 1–1.5 天 |
+| V2-7 | 第二个真实 Source Pack，全链路证明 | ⬜ | 1–2 天 |
+| V2-8 | 把已重复的接入步骤做成 onboarding CLI | 🟡 | 2–3 天 |
+| V2-9 | 开源与生产保护 | ⬜ | 1–2 天 |
+
+V2-1 至 V2-7 的可用内核约 **7–10 个开发日**。完成 V2-8 后，一个干净的 ClickHouse
+单事实关系应能在 **0.5–1.5 天**接入；需要 enrichment、隐私治理或复杂指标时预计
+**2–5 天**。这些是规划估算，不是交付承诺。
+
+### V2-0 — 固化边界 ✅
+
+**交付：**
+
+- `docs/architecture-v2.md`：Source Pack、sealed plan、Figure Registry、evidence、tool-loop 状态门。
+- 本实施计划：切片顺序、停止条件、回滚点和第二 source 验收。
+- 明确拒绝多 dialect、动态 JOIN、runtime plugin、任意公式 DSL 和跨 source 查询。
+
+**完成定义：**文档能用一句话解释；每个模型输入都有可信代码的校验边界；ClickHouse
+建议标明 official / derived / field provenance。
+
+### V2-1 — Canonical context 与 sealed plan
+
+**一句话：**模型只能提议 intent，不能改写问题、切 source 或修改已批准 plan。
+
+**改动：**
+
+1. 新建 run-local `AnalysisState`，在 `onBoot` 初始化 bound source、空的 `plans`/
+   `evidence`；每次 `run()` 再从真实 messages 建立当前 `TurnState`。不要在 module global
+   保存会话状态。
+2. session 创建时由 UI/服务器选择并授权 source；从所有 model-facing schema 删除
+   `sourceId`。
+3. `run()` 从真实 messages 取当前 user message；从 `AnalysisDraft` 删除 `question`。
+4. `inspectAnalysis` 内部组合 canonical question + bound source，READY 后保存完整
+   `AnalysisPlan`，只把 `planId` 和短 summary 返回给模型。
+5. `renderAnalysis` 输入缩成 `{ planId }`；lookup 失败时返回 `PLAN_EXPIRED`，ClickHouse
+   调用次数必须为 0。
+6. 保留 `chat.toStreamTextOptions().prepareStep`，再按状态限制 `activeTools`；每步
+   `toolChoice: "required"`，终止条件为 verdict/notice tool 或 step budget。
+7. `clientData` 改成 `.strict()` 的浏览器元数据 schema；model、ClickHouse executor 和测试
+   dependencies 只从 server locals/agent factory 注入，并用 `onValidateMessages` 校验新消息。
+
+**必须先红后绿的测试：**
+
+- 模型伪造/复用另一 run 的 planId，不查询。
+- inspect 后没有输入字段可改变 measure、filter、grain 或 source。
+- 原问题包含 “average/latest” 时，即使 draft 没复述，guard 仍触发。
+- 首步、任意中间步都不能以 prose 提前结束。
+- turn 2/3 prompt 仍无 ViewSpec、raw rows 或 SQL。
+
+**回滚点：**保留旧 tool 名和前端输出；此片不改 ViewSpec，不改 SQL 结果。
+
+### V2-2 — 可信 clarification
+
+**一句话：**用户看到的选项来自 resolver，不来自模型。
+
+**改动：**
+
+1. planner/resolver 生成 `ClarificationSpec`，存入 `AnalysisState`，输出
+   `{ clarificationId, spec }` 给前端。
+2. `toModelOutput` 只暴露 `clarificationId`；无 `execute` 的 HITL tool 只接受该 ID。
+3. 前端从 inspect tool output 渲染 server spec，不从 pending tool input 读 question/options。
+4. 用户只提交 `optionId`；恢复时同时校验 clarification、option、source 和 run。
+5. `hydrateMessages` 把 option 与 pending toolCallId 和 run-local state 对照；重复提交幂等，
+   跨 run/replay 拒绝。
+6. resolver timeout/连接错误返回 `RESOLVER_UNAVAILABLE`，不冒充 “没有这个值”。
+7. 有 pending HITL 时，`onAction` 拒绝 drill，避免两个状态流竞争。
+
+**验收：**伪造 clarificationId/optionId 不显示选项、不查询；直接提交一个真实但歧义的
+member 也必须进入 HITL，不能因 dimension ID 正确而绕过 resolver。
+
+### V2-3 — Figure Registry 与第一个新图
+
+**一句话：**加图不加 agent tool。
+
+**改动顺序：**
+
+1. 建静态 `FIGURES`，逐种迁入 `compatible`、`finalize`、`build`、`evidence`；
+   `pipeline.ts` 只负责编排、验证、profiling 和 payload cap。
+2. 保留客户端穷尽 `RENDERERS`，因为 Trigger worker 不应 import React。
+3. `DatasetProfile` 改为按 dimension 记录 cardinality，而不是一个全局 category count。
+4. 第一个新图优先 **grouped column**（时间 × 类别 × 一个 measure）；若现有 IR 不能自然
+   表达，则改选 heatmap，但不能把 SQL 塞进 figure definition。
+5. 同步增加 ViewSpec variant、renderer、真实 fixture 和 gallery case。
+
+**验收：**新增图不改 agent tool schema、Source Pack 或 ClickHouse compiler；不兼容的
+preferred figure 被确定性替代或拒绝；漏注册 renderer 在编译期失败。
+
+### V2-4 — DecisionEvidence 与 verdict
+
+**一句话：**模型只能在服务器证明过的结论候选中选择，不能撰写结论。
+
+**改动：**
+
+1. 每次 render 保存最多 4KB 的 typed `DecisionEvidence`，不把完整 evidence 送进 prompt。
+2. label 去控制字符/换行并限长；自由文本列、category labels、数值和 table preview 都不进入
+   后续 model prompt。
+3. Figure Definition 从 typed facts 生成有限 `InsightCandidate`，完整 VerdictSpec 由 server
+   template 构造。
+4. `emitVerdict` 只接受 `{ evidenceId, candidateId }`，没有 headline/detail/数字/实体名字段；
+   非当前 run/source 的 ID 或不兼容 template 产生中性 notice。
+5. 新增只接受关闭 reason enum 的 `emitNotice`，由服务器生成 off-topic、unsupported、
+   expired 和 budget-exhausted 等中性 VerdictSpec。
+6. tool-loop 每 turn 有 query/step/evidence budget；达到预算后只允许 verdict/notice。
+
+**验收：**恶意 label 不能进入下一轮 prompt；模型没有字段可伪造统计数字或因果关系；
+同一 verdict 不能引用另一 run/source 的 evidence；模型仍看不到 ViewSpec 和 SQL。
+
+### V2-5 — 房价迁入 Source Pack
+
+**一句话：**先做一次零行为变化的领域解耦，再接第二份数据。
+
+**改动：**
+
+1. 建 `src/analysis/sources/` 和编译期 registry；Source Pack 是受 code review 的 TS，
+   不是用户上传的 YAML。
+2. 将房价 model、指标、值域 snapshot、place resolver、hierarchy、query budget、provenance
+   和 limitations 搬进 `england-wales-house-prices/`。
+3. 将全局 composed-price schema 改成 named measures；`p90_price` 等在房价 pack 内注册。
+4. 所有 filter dimension 显式声明 ClickHouse parameter type 和成员策略：`snapshot`、
+   `resolver` 或 `parameterized`。
+5. `SourceAdapter` 改名 `QueryExecutor`；继续只有一个 ClickHouse compiler，不创建 dialect
+   interface。
+6. 修复全局 `CLICKHOUSE_DATABASE` 覆盖所有 model 的问题；relation 归 bound pack 所有。
+7. system prompt 拆为通用约束 + 有界 source catalog；catalog 不含 SQL/table/database。
+
+**验收：**现有 golden、fixture、agent 与 live query 行为保持一致；core 不再出现
+price、county、district、locality、`GeoLevel` 等领域术语。
+
+### V2-6 — 通用 member resolution 与下钻
+
+**一句话：**地理、产品、团队等层级共用一个受治理语义 action。
+
+**改动：**
+
+1. 用声明式 `ValueResolver`/`memberLookup` 替换 `place-resolver.ts`；SQL 只使用注册
+   expression，用户值全部 parameterized。
+2. 将 `GeoLevel` 替换为 Source Pack hierarchy；builder 生成 semantic drill action。
+3. `onAction` 针对 bound source、hierarchy、值域和当前 scope 再验证，然后直接
+   plan → query → build → stream；不调用模型。
+4. action 没有 SQL/表达式；V2 首版重新验证 scope，不先引入签名服务。
+
+**验收：**无效层级、值或越权 source 不查询；正常 drill 不增加 LLM call；HITL pending
+时 action 被拒绝。
+
+### V2-7 — 第二个真实 Source Pack
+
+**一句话：**只有第二份真实数据全链路通过，才能宣称“支持更多数据”。
+
+选一个与房价明显不同的追加型事实数据，例如 support tickets、交通行程或能源读数。
+它至少要有一个 time dimension、两个 category dimensions、一个 additive measure、一个
+non-additive measure/ratio，以及一个适合 distribution 的 numeric value。
+
+**变更约束：**除新 pack、registry entry、fixtures 和测试外，不得修改 agent、tools、
+pipeline、compiler 或已有 Figure Definition；若必须修改，说明 core contract 仍不完整，
+应先回到相应切片修复。
+
+**验收：**
+
+- 至少 12 个 golden questions 覆盖 KPI、趋势、比较、表格、分布及一个新图。
+- 未知 measure/dimension/figure 在 SQL 生成前停止；歧义 value 进入 HITL。
+- hostile filter injection 测试通过；所有用户值仍参数化。
+- compile → execute stub → validate/profile → ViewSpec 全链路 fixture 通过。
+- 至少 5 个 credential-gated live smoke cases，并验证 query limits 与 `EXPLAIN indexes = 1`。
+- 每张图保留 source、freshness、measure definition、limitations、query ID 和扫描统计。
+- pack README 写清 row grain、来源、许可证、刷新方式、PII、时区和 schema drift 操作。
+
+### V2-8 — Onboarding CLI 🟡
+
+**开始条件：**手工完成第二个 Source Pack 后，确实观察到重复步骤；此前不做 generator。
+
+建议三个命令：
+
+```bash
+npm run source:inspect -- analytics.tickets
+npm run source:init -- support-tickets
+npm run source:doctor -- support-tickets
+```
+
+- `inspect` 只读采集 columns/comments、engine、row/byte count、ORDER BY/primary/partition、
+  skip indexes、date range、cardinality、null coverage、有界脱敏 sample、schema fingerprint，
+  并对代表查询运行 `EXPLAIN`。
+- `init` 只生成带 `TODO: confirm` 的草稿。LLM 可以起草 label/description/synonym，不能
+  发布 measure、SQL expression 或权限策略。
+- `doctor` 检查 ID/synonym 冲突、默认指标、parameter type、additivity/limitation、SQL
+  `EXPLAIN`、query caps、snapshot normalization、schema drift、golden case 和图表兼容性。
+
+必须由人确认：row grain、指标业务定义、单位/货币/时区、ratio 分子分母、可加性、PII、
+小样本抑制、权限、来源/许可证/freshness、enrichment 和 ORDER BY 是否符合真实查询。
+
+### V2-9 — 开源与生产保护
+
+- 保持 MIT；提供一份可公开的小型 demo data 或一键加载的开放数据说明。
+- `.env.example` 只列变量名；CI 使用 stub executor，live tests 明确 opt-in。
+- ClickHouse 使用 read-only role、settings profile、rows/bytes/time limits 和 per-user quota。
+- source picker 只显示用户有权访问的 packs；日志不记录原始敏感 filter values。
+- 发布 source-pack template、最小示例、contract checklist、架构图和 15 分钟 quickstart。
+- 图表补 keyboard、色盲 palette、文本摘要/数据表 fallback；“答案是图”不等于排除读屏用户。
+- 记录 telemetry：unknown term、clarification rate、query failure、fallback figure、scan/time；
+  只用这些证据决定下一张图、rollup 或 resolver。
+
+### 发布闸门与停止条件
+
+1. **V2-1/V2-2 是安全闸门，先于扩图和接数据。**否则扩展只会放大当前可绕过边界。
+2. **V2-3 与 V2-5 分开合并。**一个证明“加图”，一个证明“加 source”。
+3. **V2-7 通过前，不对外声称任意数据。**准确说法是“支持经过治理的 ClickHouse
+   单事实 Source Packs”。
+4. 若新 source 需要 dynamic JOIN，先在 ClickHouse 用 dictionary、denormalization 或
+   refreshable MV 形成一个逻辑事实关系；不把 JOIN planner 加进 agent。
+5. 只有 query telemetry 证明重复聚合是热点，才加 incremental MV；始终保留 raw fallback。
+6. hackathon 提交窗口内不一次性实施全部 V2；只选一个能端到端演示的安全切片，其余保持
+   文档化，避免在 feature freeze 前大重构。
+
+---
+
+## V1 — 现有实现与历史进度
+
 > **Figure generator redesign (19 Jul):** the generic semantic-query, chart-policy,
 > validation, explanation, and clarification implementation is documented in
 > [`FIGURE_GENERATOR_IMPLEMENTATION.md`](FIGURE_GENERATOR_IMPLEMENTATION.md).
 
-> **这份文档是"做什么、做到哪了"的单一真相源。**
-> `PLAN.md` 记录*为什么*这么设计;这里记录*进度*。
-> 状态核对于 2026-07-18(Day 2 进行中),对着文件系统和 ClickHouse 实测,不是凭记忆。
+> 下面记录 2026-07-18 起的 V1 状态，供核对已有能力与历史决策；Architecture V2 的
+> 当前执行状态以上面的 V2 表为准。
 
 **图例:** ✅ 已完成并验证 · 🔨 进行中 · ⬜ 未开始 · 🟡 可选/若领先才做
 

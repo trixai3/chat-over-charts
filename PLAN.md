@@ -820,3 +820,62 @@ Raised in a re-planning discussion; **not yet resolved**. Trish paused here.
 4. **Demo climax.** Adding chart kinds widens capability but doesn't itself create a wow moment.
    What's the peak beat after deepening — a continuous compare → drill → timeline → distribution
    walk in one conversation, or something else?
+
+---
+
+## 13. Architecture V2 — 受治理地扩展数据与图表（20 Jul）
+
+**状态：设计已决定，尚未实现。**完整设计见
+[`docs/architecture-v2.md`](docs/architecture-v2.md)，执行顺序与验收见
+[`IMPLEMENTATION.md`](IMPLEMENTATION.md) 顶部。
+
+Trish 的新目标是：这套模式未来确实能接更多图表和数据，但不能变成复杂 BI 平台，也
+不能扩大模型的幻觉权限。它更新了 §12 的**未来开源方向**，但不自动扩大当前 hackathon
+release scope；feature freeze 前仍只做能端到端验证的小切片。
+
+### 13.1 一句话架构
+
+> 模型只把 canonical user question 翻译成受限 intent；服务器把它解析成不可篡改的
+> plan，唯一 ClickHouse compiler 执行，静态 Figure Registry 生成图和确定性 evidence。
+
+### 13.2 新决定
+
+| Decision | Choice | Why |
+|---|---|---|
+| 数据扩展边界 | 编译期可信 `SourcePack`，每 pack 一个 ClickHouse 逻辑事实关系 | 新数据不增加 agent tools；避免动态 JOIN、dialect 和 runtime plugin |
+| Source 选择 | 一个 session 绑定一个已授权 source，模型输入没有 `sourceId` | 防止臆造、越权或同名指标跨源串线 |
+| 原始问题 | 服务器从真实 user message 读取，tool schema 不含 `question` | 模型不能改写问题来绕过 average/latest 等 guard |
+| Intent grounding | 非默认语义必须对应用户原文 span 或 trusted clarification | 合法 ID 不等于用户真的问了它；删除模型“自证已确认”的字段 |
+| Inspect → execute | planner 保存 sealed plan；render 只接受 opaque `planId` | 消除 inspect 一套、render 偷换另一套的 TOCTOU |
+| Clarification | resolver 生成 spec/option IDs；模型只传 opaque ID | UI 不显示模型编造的选项，恢复结果可验证 |
+| 图表扩展边界 | server `FIGURES` + client `RENDERERS` 两个静态穷尽 registry | server 不 import React；加图仍有编译期保险，不做 runtime plugin |
+| Verdict | server 从 typed evidence 生成有限 candidates；模型只能选 candidate ID | 没有自由文本、数字或因果幻觉通道 |
+| Tool control flow | 单一有限状态 tool loop，每步 `toolChoice: required` | 保留 `chat.agent()` 的自适应，同时机械阻止首步 prose 和任意工具顺序 |
+| 一 turn 查询预算 | V2 首版一个 active plan、一次 query | ClickHouse 可在一次聚合完成比较；不让模型用 15 steps 自由扫库 |
+| 多表数据 | 先 denormalize、dictionary 或 refreshable MV 成逻辑事实关系 | enrichment 是数据建模责任，不让模型决定 JOIN |
+| Rollup | raw fallback 常驻；只按 query telemetry 增 incremental MV | 不为假想热点堆预聚合表 |
+| 数据库范围 | V2 只支持 ClickHouse | 当前 `SourceAdapter` 实际只是 executor；不为不存在的第二 dialect 抽象 |
+| Onboarding 自动化 | 手工完成第二 source 后才做 inspect/init/doctor CLI | 先观察重复工作，再自动化；生成草稿不能批准指标语义 |
+
+### 13.3 诚实的能力声明
+
+Architecture V2 不是 “任何 data”。准确说法是：
+
+> 支持多个经过治理的 ClickHouse 单事实 Source Packs；复杂原始数据可先在 ClickHouse
+> 形成宽表或受治理 view，再接入 agent。
+
+也不是 “所有 charts”。准确说法是：
+
+> 支持 registry 中有明确数据角色、约束、builder、renderer 和 contract tests 的图表；
+> 新图按真实分析语义逐个加入。
+
+### 13.4 证明顺序
+
+1. 先堵住 canonical question、sealed plan 和 trusted clarification 三个安全缺口。
+2. 再用 grouped column 证明“加图不加 tool”。
+3. 把房价迁入 Source Pack，行为完全不变。
+4. 接一个非房价的真实 source，证明“加数据不改 core”。
+5. 第二次接入后才把重复步骤做成 onboarding CLI。
+
+若第 4 步必须修改 agent、pipeline、compiler 或已有 figures，则 Source Pack contract 尚未
+成立，不能靠新增 hook 掩盖；回到相应切片修正最小接口。
