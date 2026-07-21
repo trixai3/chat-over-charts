@@ -1,6 +1,6 @@
 # Beyond the Wall of Text
 
-**A chat agent for UK house prices where the answer is a chart you can drill into — never a paragraph.**
+**Chat with your data and get answers as governed figures, not paragraphs — shown here on UK house prices.**
 
 Built for the [ClickHouse × Trigger.dev Virtual Summer Hackathon 2026](https://triggerdev.clickhouse.com).
 

@@ -82,7 +82,6 @@ export const timeseriesFixture: ViewSpec = {
       ],
     },
   ],
-  drillTargets: [],
   stats: { rowsRead: 31192683, elapsedMs: 38, queryId: "fixture-timeseries" },
   explanation,
 };
@@ -213,16 +212,6 @@ export const noticeFixture: ViewSpec = {
   suggestions: ["Choose one county or select up to forty categories."],
 };
 
-export const disambiguationFixture: ViewSpec = {
-  kind: "disambiguation",
-  query: "Clapham",
-  prompt: "Which Clapham do you mean?",
-  candidates: [
-    { label: "Lambeth, Greater London", sublabel: "559 sales", target: { label: "Clapham (Lambeth)", level: "district", value: "LAMBETH" } },
-    { label: "Bedford, Bedfordshire", sublabel: "1,359 sales", target: { label: "Clapham (Bedford)", level: "district", value: "BEDFORD" } },
-  ],
-};
-
 export const ALL_FIXTURES: { name: string; spec: ViewSpec }[] = [
   { name: "verdict", spec: verdictFixture },
   { name: "kpi", spec: kpiFixture },
@@ -234,7 +223,6 @@ export const ALL_FIXTURES: { name: string; spec: ViewSpec }[] = [
   { name: "area", spec: areaFixture },
   { name: "table", spec: tableFixture },
   { name: "notice", spec: noticeFixture },
-  { name: "disambiguation", spec: disambiguationFixture },
 ];
 
 export const BROKEN_FIXTURE = { kind: "timeseries", title: "Missing series and provenance" };

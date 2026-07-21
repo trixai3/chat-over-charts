@@ -235,7 +235,6 @@ function buildTimeseries(
       label,
       points: [...points].sort((a, b) => a.t.localeCompare(b.t)),
     })),
-    drillTargets: [],
     stats,
     explanation: manifest,
   };
@@ -674,8 +673,6 @@ function baseSummary(spec: ViewSpec): string {
         `${scopeSuffix(spec.explanation.scope)}`
       );
     }
-    case "disambiguation":
-      return `${spec.candidates.length} candidates require a choice.`;
     case "verdict":
       return "Verdict delivered.";
   }

@@ -26,20 +26,6 @@ export const ValueFormat = z.discriminatedUnion("style", [
 ]);
 export type ValueFormat = z.infer<typeof ValueFormat>;
 
-/**
- * Drill-down remains a housing-shaped placeholder. It is deliberately not
- * generalized until the interaction itself has been designed.
- */
-export const GeoLevel = z.enum(["country", "county", "district", "town", "street"]);
-export type GeoLevel = z.infer<typeof GeoLevel>;
-
-export const DrillTarget = z.object({
-  label: z.string(),
-  level: GeoLevel,
-  value: z.string(),
-});
-export type DrillTarget = z.infer<typeof DrillTarget>;
-
 export const ExplanationManifest = z.object({
   whatShown: z.string(),
   calculation: z.string(),
@@ -93,7 +79,6 @@ const TimeseriesSpec = z.object({
       }),
     )
     .min(1),
-  drillTargets: z.array(DrillTarget).default([]),
   stats: QueryStats,
   explanation: ExplanationManifest,
 });
@@ -110,7 +95,6 @@ const ComparisonSpec = z.object({
         label: z.string(),
         value: z.number(),
         delta: z.number().optional(),
-        drill: DrillTarget.optional(),
       }),
     )
     .min(1),
@@ -190,22 +174,6 @@ const NoticeSpec = z.object({
   suggestions: z.array(z.string()).default([]),
 });
 
-/** Visible half of the pending no-execute clarification tool. */
-const DisambiguationSpec = z.object({
-  kind: z.literal("disambiguation"),
-  query: z.string(),
-  prompt: z.string(),
-  candidates: z
-    .array(
-      z.object({
-        label: z.string(),
-        sublabel: z.string().optional(),
-        target: DrillTarget,
-      }),
-    )
-    .min(2),
-});
-
 export const ViewSpec = z.discriminatedUnion("kind", [
   VerdictSpec,
   KpiSpec,
@@ -217,7 +185,6 @@ export const ViewSpec = z.discriminatedUnion("kind", [
   AreaSpec,
   TableSpec,
   NoticeSpec,
-  DisambiguationSpec,
 ]);
 
 export type ViewSpec = z.infer<typeof ViewSpec>;

@@ -9,7 +9,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 # Beyond the Wall of Text — agent guide
 
 Hackathon entry: ClickHouse × Trigger.dev, 17–23 July 2026. A chat agent for UK house prices where
-**the response is a chart you can drill into, never a paragraph.**
+**the response is a governed figure, never a paragraph.**
 
 Read [PLAN.md](PLAN.md) before making architectural decisions. It records what was decided *and why*,
 including ideas that were tried and dropped.
@@ -49,8 +49,7 @@ and the public website both can be. **Check here first, before the web, before y
 Most relevant to this build:
 
 - `ai-chat/quick-start.mdx`, `anatomy.mdx`, `backend.mdx`, `frontend.mdx`, `tools.mdx`, `types.mdx`
-- `ai-chat/actions.mdx` — the drill-down mechanism
-- `ai-chat/patterns/human-in-the-loop.mdx` — the disambiguation tile
+- `ai-chat/patterns/human-in-the-loop.mdx` — place disambiguation suspends the run (`requestClarification`)
 - `ai-chat/reference.mdx` — the AI SDK compatibility matrix
 - `ai-chat/testing.mdx`, `chat-local.mdx` — local dev without deploying
 
@@ -82,10 +81,7 @@ mention `chat.agent`), not as skills. Use the docs; don't trust the skills on th
    `tile-renderer.tsx`. It guards version skew, not hallucination. Don't add validation elsewhere.
 7. **No Next.js API routes.** `chat.agent()` + `useTriggerChatTransport` replace them. Adding a
    route means the architecture was misunderstood.
-8. **Drill-down never calls the LLM.** It goes through `onAction`, returning void, on the same
-   durable run. (Note: `onAction` is *designed* for state mutation — undo/rollback/edit. We're
-   borrowing it. Test the edges.)
-9. **Aggregate in ClickHouse; stream small results.** Specs carry data, not query references. Never
+8. **Aggregate in ClickHouse; stream small results.** Specs carry data, not query references. Never
    stream raw rows.
 
 ## Version pinning

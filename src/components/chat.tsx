@@ -7,7 +7,6 @@ import { useTriggerChatTransport } from "@trigger.dev/sdk/chat/react";
 import type { houseAgent } from "../../trigger/house-agent";
 import { mintChatAccessToken, startChatSession } from "@/app/actions";
 import { Tile } from "@/components/tile-renderer";
-import type { DrillTarget } from "@/shared/view-spec";
 
 const EXAMPLES = [
   "How did median prices change per year in London's top districts?",
@@ -175,8 +174,6 @@ export function Chat() {
     [sendMessage],
   );
 
-  // Deliberate placeholder: drill behavior is outside this redesign.
-  const onDrill = (target: DrillTarget) => console.log("drill placeholder:", target);
   const isStreaming = status === "streaming" || status === "submitted";
   const empty = messages.length === 0;
   const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
@@ -195,7 +192,7 @@ export function Chat() {
       <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight">Beyond the Wall of Text</h1>
         <p className="mt-1 text-sm text-black/50 dark:text-white/50">
-          Ask an analytical question. The answer is a governed figure, never a paragraph.
+          Chat with your data and get answers as governed figures, not paragraphs — shown here on UK house prices.
         </p>
       </header>
 
@@ -268,7 +265,7 @@ export function Chat() {
                   </div>
                 ))}
                 {tiles.map((spec, index) => (
-                  <Tile key={index} part={spec} onDrill={onDrill} onResolve={onDrill} />
+                  <Tile key={index} part={spec} />
                 ))}
               </div>
             );

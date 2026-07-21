@@ -1,12 +1,11 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { type DrillTarget, ViewSpec, type ViewSpecKind } from "@/shared/view-spec";
+import { ViewSpec, type ViewSpecKind } from "@/shared/view-spec";
 import { VerdictTile } from "./tiles/verdict-tile";
 import { TimeseriesTile } from "./tiles/timeseries-tile";
 import { ComparisonTile } from "./tiles/comparison-tile";
 import { DistributionTile } from "./tiles/distribution-tile";
-import { DisambiguationTile } from "./tiles/disambiguation-tile";
 import { KpiTile } from "./tiles/kpi-tile";
 import { TableTile } from "./tiles/table-tile";
 import { NoticeTile } from "./tiles/notice-tile";
@@ -16,8 +15,6 @@ import { AreaTile } from "./tiles/area-tile";
 
 export type TileProps = {
   spec: never;
-  onDrill?: (target: DrillTarget) => void;
-  onResolve?: (target: DrillTarget) => void;
 };
 
 /**
@@ -35,7 +32,6 @@ const RENDERERS = {
   area: AreaTile,
   table: TableTile,
   notice: NoticeTile,
-  disambiguation: DisambiguationTile,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } satisfies Record<ViewSpecKind, ComponentType<any>>;
 
@@ -59,26 +55,14 @@ function BrokenTile({ reason }: { reason: string }) {
  * cross the wire as JSON through Trigger.dev streams and arrive as `unknown`.
  * Parsing here turns a version-skew white screen into a visible broken tile.
  */
-export function Tile({
-  part,
-  onDrill,
-  onResolve,
-}: {
-  part: unknown;
-  onDrill?: (target: DrillTarget) => void;
-  onResolve?: (target: DrillTarget) => void;
-}) {
+export function Tile({ part }: { part: unknown }) {
   const parsed = ViewSpec.safeParse(part);
   if (!parsed.success) {
     return <BrokenTile reason={parsed.error.issues.map((i) => i.message).join("; ")} />;
   }
 
   const spec = parsed.data;
-  const Renderer = RENDERERS[spec.kind] as ComponentType<{
-    spec: typeof spec;
-    onDrill?: (target: DrillTarget) => void;
-    onResolve?: (target: DrillTarget) => void;
-  }>;
+  const Renderer = RENDERERS[spec.kind] as ComponentType<{ spec: typeof spec }>;
 
-  return <Renderer spec={spec} onDrill={onDrill} onResolve={onResolve} />;
+  return <Renderer spec={spec} />;
 }
