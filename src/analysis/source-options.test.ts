@@ -14,6 +14,7 @@ describe("listSourceOptions", () => {
     expect(housing?.database).toBe("HACK_BWT");
     expect(housing?.table).toBe("sales");
     expect(housing?.rowScale).toBeDefined();
+    expect(housing?.availableRange).toEqual(["1995-01-01", "2026-05-29"]);
     expect(housing?.exampleQuestions).toEqual([
       "How did median prices change per year in London's top districts?",
       "Show Lambeth median prices by year since 2015",

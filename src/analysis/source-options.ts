@@ -13,6 +13,7 @@ export type SourceOption = {
   database: string;
   table: string;
   rowScale?: string;
+  availableRange?: [string, string];
   exampleQuestions: string[];
 };
 
@@ -24,6 +25,7 @@ export function listSourceOptions(): SourceOption[] {
     database: model.database,
     table: model.table,
     rowScale: model.rowScale,
+    availableRange: model.availableRange,
     exampleQuestions: model.exampleQuestions ?? [],
   }));
 }

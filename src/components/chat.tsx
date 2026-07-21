@@ -162,40 +162,64 @@ export function Chat({ sources }: { sources: SourceOption[] }) {
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col gap-8 px-6 py-10 md:flex-row">
       <aside className="md:w-64 md:shrink-0">
-        <h2 className="mb-2 font-mono text-[11px] uppercase tracking-wide text-black/35 dark:text-white/35">
-          Data sources
-        </h2>
-        <div className="flex flex-col gap-2">
+        <label
+          htmlFor="source-select"
+          className="mb-2 block font-mono text-[11px] uppercase tracking-wide text-black/35 dark:text-white/35"
+        >
+          Data source
+        </label>
+        {/* A change event only fires on an actual change, so re-picking the
+            current source can never remount ChatSession (that would drop the run). */}
+        <select
+          id="source-select"
+          value={sourceId}
+          onChange={(event) => setSourceId(event.target.value)}
+          className="w-full appearance-none rounded-lg border border-black/15 bg-white px-3 py-2 text-sm outline-none focus:border-black/40 dark:border-white/15 dark:bg-black dark:focus:border-white/40"
+        >
           {sources.map((source) => (
-            <button
-              key={source.id}
-              type="button"
-              // Clicking the already-selected source is a no-op — guarded so
-              // it never remounts ChatSession (that would drop the run).
-              onClick={() => {
-                if (source.id !== sourceId) setSourceId(source.id);
-              }}
-              className={
-                source.id === sourceId
-                  ? "flex w-full flex-col gap-1 rounded-lg border border-black/60 bg-black/[0.04] p-3 text-left dark:border-white/60 dark:bg-white/[0.06]"
-                  : "flex w-full flex-col gap-1 rounded-lg border border-black/10 bg-black/[0.02] p-3 text-left transition-colors hover:bg-black/[0.05] dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
-              }
-            >
-              <span className="text-sm font-medium">{source.label}</span>
-              <span className="font-mono text-[11px] text-black/40 dark:text-white/40">
-                {source.database}.{source.table}
-              </span>
-              <span className="text-[11px] text-black/40 dark:text-white/40">
-                {source.sourceSystem}
-              </span>
-              {source.rowScale && (
-                <span className="text-[10px] text-black/35 dark:text-white/35">
-                  {source.rowScale}
-                </span>
-              )}
-            </button>
+            <option key={source.id} value={source.id}>
+              {source.label}
+            </option>
           ))}
-        </div>
+        </select>
+
+        {active && (
+          <dl className="mt-3 flex flex-col gap-2 rounded-lg border border-black/10 bg-black/[0.02] p-3 dark:border-white/10 dark:bg-white/[0.03]">
+            <div>
+              <dt className="font-mono text-[10px] uppercase tracking-wide text-black/35 dark:text-white/35">
+                Table
+              </dt>
+              <dd className="font-mono text-[11px] text-black/70 dark:text-white/70">
+                {active.database}.{active.table}
+              </dd>
+            </div>
+            <div>
+              <dt className="font-mono text-[10px] uppercase tracking-wide text-black/35 dark:text-white/35">
+                Source
+              </dt>
+              <dd className="text-[11px] text-black/70 dark:text-white/70">{active.sourceSystem}</dd>
+            </div>
+            {active.rowScale && (
+              <div>
+                <dt className="font-mono text-[10px] uppercase tracking-wide text-black/35 dark:text-white/35">
+                  Scale
+                </dt>
+                <dd className="text-[11px] text-black/70 dark:text-white/70">{active.rowScale}</dd>
+              </div>
+            )}
+            {active.availableRange && (
+              <div>
+                <dt className="font-mono text-[10px] uppercase tracking-wide text-black/35 dark:text-white/35">
+                  Coverage
+                </dt>
+                <dd className="font-mono text-[11px] text-black/70 dark:text-white/70">
+                  {active.availableRange[0]} → {active.availableRange[1]}
+                </dd>
+              </div>
+            )}
+          </dl>
+        )}
+
         {sources.length > 1 && (
           <p className="mt-3 text-[11px] text-black/40 dark:text-white/40">
             Switching sources starts a new conversation.
