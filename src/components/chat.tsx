@@ -156,48 +156,71 @@ export function Chat({ sources }: { sources: SourceOption[] }) {
   const [sourceId, setSourceId] = useState(sources[0]?.id);
   const active = sources.find((source) => source.id === sourceId);
 
+  // `w-full` is load-bearing: without it, `mx-auto` inside a flex-col body
+  // makes this container shrink-wrap its content, collapsing the `flex-1`
+  // right column below (bitten by this exact bug before).
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-6 py-10">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Beyond the Wall of Text</h1>
-        <p className="mt-1 text-sm text-black/50 dark:text-white/50">
-          Chat with your data and get answers as governed figures, not paragraphs — shown here on UK house prices.
-        </p>
-      </header>
-
-      {sources.length > 1 && (
-        <div className="mb-6 flex flex-col gap-2">
-          <div className="flex flex-wrap gap-2">
-            {sources.map((source) => (
-              <button
-                key={source.id}
-                type="button"
-                onClick={() => setSourceId(source.id)}
-                className={
-                  source.id === sourceId
-                    ? "rounded-full bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-                    : "rounded-lg border border-black/10 bg-black/[0.02] px-4 py-2 text-sm transition-colors hover:bg-black/[0.05] dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
-                }
-              >
-                {source.label}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-black/40 dark:text-white/40">
+    <div className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col gap-8 px-6 py-10 md:flex-row">
+      <aside className="md:w-64 md:shrink-0">
+        <h2 className="mb-2 font-mono text-[11px] uppercase tracking-wide text-black/35 dark:text-white/35">
+          Data sources
+        </h2>
+        <div className="flex flex-col gap-2">
+          {sources.map((source) => (
+            <button
+              key={source.id}
+              type="button"
+              // Clicking the already-selected source is a no-op — guarded so
+              // it never remounts ChatSession (that would drop the run).
+              onClick={() => {
+                if (source.id !== sourceId) setSourceId(source.id);
+              }}
+              className={
+                source.id === sourceId
+                  ? "flex w-full flex-col gap-1 rounded-lg border border-black/60 bg-black/[0.04] p-3 text-left dark:border-white/60 dark:bg-white/[0.06]"
+                  : "flex w-full flex-col gap-1 rounded-lg border border-black/10 bg-black/[0.02] p-3 text-left transition-colors hover:bg-black/[0.05] dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
+              }
+            >
+              <span className="text-sm font-medium">{source.label}</span>
+              <span className="font-mono text-[11px] text-black/40 dark:text-white/40">
+                {source.database}.{source.table}
+              </span>
+              <span className="text-[11px] text-black/40 dark:text-white/40">
+                {source.sourceSystem}
+              </span>
+              {source.rowScale && (
+                <span className="text-[10px] text-black/35 dark:text-white/35">
+                  {source.rowScale}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        {sources.length > 1 && (
+          <p className="mt-3 text-[11px] text-black/40 dark:text-white/40">
             Switching sources starts a new conversation.
           </p>
-        </div>
-      )}
+        )}
+      </aside>
 
-      {active === undefined ? (
-        <p className="text-sm text-black/50 dark:text-white/50">No data source is registered.</p>
-      ) : (
-        // The `key` remount IS the new-conversation mechanic: changing it tears
-        // down ChatSession's useChat state and mounts a fresh instance with a
-        // fresh chatId, so onBoot binds the newly selected source server-side.
-        <ChatSession key={active.id} source={active} />
-      )}
-    </main>
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className="mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight">Beyond the Wall of Text</h1>
+          <p className="mt-1 text-sm text-black/50 dark:text-white/50">
+            Chat with your data and get answers as governed figures, not paragraphs — shown here on UK house prices.
+          </p>
+        </header>
+
+        {active === undefined ? (
+          <p className="text-sm text-black/50 dark:text-white/50">No data source is registered.</p>
+        ) : (
+          // The `key` remount IS the new-conversation mechanic: changing it tears
+          // down ChatSession's useChat state and mounts a fresh instance with a
+          // fresh chatId, so onBoot binds the newly selected source server-side.
+          <ChatSession key={active.id} source={active} />
+        )}
+      </main>
+    </div>
   );
 }
 

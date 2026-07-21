@@ -11,6 +11,9 @@ describe("listSourceOptions", () => {
     expect(housing).toBeDefined();
     expect(housing?.label).toBe("UK House Price Paid");
     expect(housing?.sourceSystem).toContain("Land Registry");
+    expect(housing?.database).toBe("HACK_BWT");
+    expect(housing?.table).toBe("sales");
+    expect(housing?.rowScale).toBeDefined();
     expect(housing?.exampleQuestions).toEqual([
       "How did median prices change per year in London's top districts?",
       "Show Lambeth median prices by year since 2015",
@@ -77,6 +80,8 @@ describe("listSourceOptions", () => {
         id: "support-tickets-test",
         label: "Support tickets",
         sourceSystem: "Test fixture",
+        database: "test",
+        table: "tickets",
         exampleQuestions: [],
       });
     } finally {
