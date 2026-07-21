@@ -29,6 +29,19 @@ describe("resolveMember", () => {
     expect(adapter.lastQuery?.params.member).toBe("CLAPHAM");
   });
 
+  it("looks up against the pack's own database, ignoring the global env override", async () => {
+    const adapter = stubAdapter([{ county: "GREATER LONDON", district: "LAMBETH", _count: 559 }]);
+    const previous = process.env.CLICKHOUSE_DATABASE;
+    process.env.CLICKHOUSE_DATABASE = "SOMEWHERE_ELSE";
+    try {
+      await resolveMember(model, localityResolver, "clapham", adapter);
+      expect(adapter.lastQuery?.params.database).toBe(model.database);
+    } finally {
+      if (previous === undefined) delete process.env.CLICKHOUSE_DATABASE;
+      else process.env.CLICKHOUSE_DATABASE = previous;
+    }
+  });
+
   it("maps rows to candidates keyed by every ancestor in the hierarchy", async () => {
     const adapter = stubAdapter([
       { county: "GREATER LONDON", district: "LAMBETH", _count: 559 },

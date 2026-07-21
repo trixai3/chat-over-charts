@@ -32,6 +32,20 @@ describe("ClickHouse semantic compiler", () => {
     expect(query.params.filter_0).toBe("GREATER LONDON");
   });
 
+  it("compiles against the pack's own database, ignoring the global env override", () => {
+    const plan = londonComparisonPlan();
+    const model = getSemanticModel(plan.request.sourceId)!;
+    const previous = process.env.CLICKHOUSE_DATABASE;
+    process.env.CLICKHOUSE_DATABASE = "SOMEWHERE_ELSE";
+    try {
+      const query = compileClickHouseQuery(plan.request, model);
+      expect(query.params.database).toBe(model.database);
+    } finally {
+      if (previous === undefined) delete process.env.CLICKHOUSE_DATABASE;
+      else process.env.CLICKHOUSE_DATABASE = previous;
+    }
+  });
+
   it("compiles a measure threshold as HAVING over the aggregate, parameterized", () => {
     const plan = planAnalysis({
       question: "Which London boroughs have a median over 500k?",

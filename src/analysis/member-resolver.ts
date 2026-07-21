@@ -94,7 +94,9 @@ export async function resolveMember(
       `LIMIT ${LOOKUP_LIMIT}`,
     ].join("\n"),
     params: {
-      database: process.env.CLICKHOUSE_DATABASE ?? model.database,
+      // Same rule as compileClickHouseQuery: the pack owns its relation, so a
+      // global env override cannot cross sources.
+      database: model.database,
       table: model.table,
       [MEMBER_PARAM]: member,
     },

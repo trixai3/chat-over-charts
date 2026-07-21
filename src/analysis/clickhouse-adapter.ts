@@ -124,7 +124,10 @@ export function compileClickHouseQuery(
   model: SemanticModel,
 ): CompiledQuery {
   const params: Record<string, unknown> = {
-    database: process.env.CLICKHOUSE_DATABASE ?? model.database,
+    // The pack owns its relation: with several sources registered, a global
+    // CLICKHOUSE_DATABASE override would silently point them all at one
+    // database, so the model's own declaration is authoritative.
+    database: model.database,
     table: model.table,
   };
   const dimensionAliases = request.dimensions.map((field) => field.field);
