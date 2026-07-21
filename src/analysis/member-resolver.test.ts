@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { lookupLocality, planWithPlaceResolution } from "./place-resolver";
+import { planWithMemberResolution, resolveMember } from "./member-resolver";
 import { getSemanticModel } from "./semantic-model";
 import type { AnalysisDraft, CompiledQuery, SourceAdapter } from "./types";
 
 const model = getSemanticModel("uk-house-prices")!;
+const localityResolver = model.memberResolvers![0]!;
 
 function stubAdapter(rows: Array<Record<string, unknown>>): SourceAdapter & {
   lastQuery?: CompiledQuery;
@@ -20,23 +21,23 @@ function stubAdapter(rows: Array<Record<string, unknown>>): SourceAdapter & {
   return adapter;
 }
 
-describe("lookupLocality", () => {
-  it("compiles a parameterized locality lookup, uppercasing and trimming the term", async () => {
-    const adapter = stubAdapter([{ county: "GREATER LONDON", district: "LAMBETH", sales: 559 }]);
-    await lookupLocality("clapham ", model, adapter);
-    expect(adapter.lastQuery?.sql).toContain("WHERE locality = {place:String}");
-    expect(adapter.lastQuery?.params.place).toBe("CLAPHAM");
+describe("resolveMember", () => {
+  it("compiles a parameterized leaf lookup, normalizing the term per the leaf dimension", async () => {
+    const adapter = stubAdapter([{ county: "GREATER LONDON", district: "LAMBETH", _count: 559 }]);
+    await resolveMember(model, localityResolver, "clapham ", adapter);
+    expect(adapter.lastQuery?.sql).toContain("WHERE locality = {member:String}");
+    expect(adapter.lastQuery?.params.member).toBe("CLAPHAM");
   });
 
-  it("maps rows to candidates", async () => {
+  it("maps rows to candidates keyed by every ancestor in the hierarchy", async () => {
     const adapter = stubAdapter([
-      { county: "GREATER LONDON", district: "LAMBETH", sales: 559 },
-      { county: "BEDFORDSHIRE", district: "BEDFORD", sales: 1200 },
+      { county: "GREATER LONDON", district: "LAMBETH", _count: 559 },
+      { county: "BEDFORDSHIRE", district: "BEDFORD", _count: 1200 },
     ]);
-    const candidates = await lookupLocality("clapham", model, adapter);
+    const candidates = await resolveMember(model, localityResolver, "clapham", adapter);
     expect(candidates).toEqual([
-      { locality: "CLAPHAM", county: "GREATER LONDON", district: "LAMBETH", sales: 559 },
-      { locality: "CLAPHAM", county: "BEDFORDSHIRE", district: "BEDFORD", sales: 1200 },
+      { value: "CLAPHAM", ancestors: { district: "LAMBETH", county: "GREATER LONDON" }, count: 559 },
+      { value: "CLAPHAM", ancestors: { district: "BEDFORD", county: "BEDFORDSHIRE" }, count: 1200 },
     ]);
   });
 
@@ -46,11 +47,11 @@ describe("lookupLocality", () => {
         throw new Error("connection refused");
       },
     };
-    expect(await lookupLocality("clapham", model, adapter)).toEqual([]);
+    expect(await resolveMember(model, localityResolver, "clapham", adapter)).toEqual([]);
   });
 });
 
-describe("planWithPlaceResolution", () => {
+describe("planWithMemberResolution", () => {
   it("zero-hit: leaves the plan unsupported with its original reason", async () => {
     const draft: AnalysisDraft = {
       question: "How much is a house in Atlantis",
@@ -61,14 +62,14 @@ describe("planWithPlaceResolution", () => {
       filters: [{ field: "district", operator: "equals", value: "Atlantis" }],
       orderBy: [],
     };
-    const plan = await planWithPlaceResolution(draft, stubAdapter([]));
+    const plan = await planWithMemberResolution(draft, stubAdapter([]));
     expect(plan.status).toBe("unsupported");
     if (plan.status !== "unsupported") return;
     expect(plan.reason).toContain("Atlantis");
   });
 
-  it("single-hit: auto-scopes to locality, district, and county", async () => {
-    const adapter = stubAdapter([{ county: "GREATER LONDON", district: "LAMBETH", sales: 559 }]);
+  it("single-hit: auto-scopes to the leaf dimension and every ancestor", async () => {
+    const adapter = stubAdapter([{ county: "GREATER LONDON", district: "LAMBETH", _count: 559 }]);
     const draft: AnalysisDraft = {
       question: "How much is a house in Clapham",
       sourceId: "uk-house-prices",
@@ -78,11 +79,12 @@ describe("planWithPlaceResolution", () => {
       filters: [{ field: "district", operator: "equals", value: "Clapham" }],
       orderBy: [],
     };
-    const plan = await planWithPlaceResolution(draft, adapter);
+    const plan = await planWithMemberResolution(draft, adapter);
     expect(plan.status).toBe("ready");
     if (plan.status !== "ready") return;
-    // Locality has no snapshotted values, so it passes through unnormalized at
-    // plan time — normalization happens at compile time (valueNormalization).
+    // The leaf dimension has no snapshotted values, so it passes through
+    // unnormalized at plan time — normalization happens at compile time
+    // (valueNormalization).
     expect(plan.request.filters).toEqual(
       expect.arrayContaining([
         { field: "locality", operator: "equals", value: "Clapham" },
@@ -94,8 +96,8 @@ describe("planWithPlaceResolution", () => {
 
   it("multi-hit: needs_clarification with candidate options and no recommendation", async () => {
     const adapter = stubAdapter([
-      { county: "GREATER LONDON", district: "LAMBETH", sales: 559 },
-      { county: "BEDFORDSHIRE", district: "BEDFORD", sales: 1200 },
+      { county: "GREATER LONDON", district: "LAMBETH", _count: 559 },
+      { county: "BEDFORDSHIRE", district: "BEDFORD", _count: 1200 },
     ]);
     const draft: AnalysisDraft = {
       question: "How much is a house in Clapham",
@@ -106,7 +108,7 @@ describe("planWithPlaceResolution", () => {
       filters: [{ field: "district", operator: "equals", value: "Clapham" }],
       orderBy: [],
     };
-    const plan = await planWithPlaceResolution(draft, adapter);
+    const plan = await planWithMemberResolution(draft, adapter);
     expect(plan.status).toBe("needs_clarification");
     if (plan.status !== "needs_clarification") return;
     const ambiguity = plan.ambiguities[0];

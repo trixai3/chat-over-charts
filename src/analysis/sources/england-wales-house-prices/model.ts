@@ -130,6 +130,7 @@ export const ukHousePrices: SemanticModel = {
       synonyms: ["county", "counties"],
       cardinality: 132,
       valueNormalization: "uppercase",
+      parameterType: "String",
       values: ukHousePriceDimensionValues.county,
     },
     district: {
@@ -141,6 +142,7 @@ export const ukHousePrices: SemanticModel = {
       synonyms: ["district", "borough", "area", "districts", "boroughs", "areas"],
       cardinality: 467,
       valueNormalization: "uppercase",
+      parameterType: "String",
       values: ukHousePriceDimensionValues.district,
     },
     town: {
@@ -157,8 +159,8 @@ export const ukHousePrices: SemanticModel = {
     // 24,049 values deliberately unsnapshotted (unlike county/district/town
     // above): a locality is a neighbourhood name, not a bounded administrative
     // list, and 62% of them span multiple districts ("Clapham" alone resolves
-    // to 11 places). Existence is validated by a live place lookup at query
-    // time (place-resolver.ts) instead of a values array.
+    // to 11 places). Existence is validated by a live lookup at query time
+    // (member-resolver.ts) instead of a values array.
     locality: {
       id: "locality",
       label: "Locality",
@@ -168,6 +170,7 @@ export const ukHousePrices: SemanticModel = {
       synonyms: ["locality", "neighbourhood", "area name"],
       cardinality: 24049,
       valueNormalization: "uppercase",
+      parameterType: "String",
     },
     property_type: {
       id: "property_type",
@@ -192,4 +195,7 @@ export const ukHousePrices: SemanticModel = {
       values: ukHousePriceDimensionValues.tenure,
     },
   },
+  memberResolvers: [
+    { dimensionId: "locality", hierarchy: ["district", "county"], countLabel: "sales" },
+  ],
 };

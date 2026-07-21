@@ -226,6 +226,22 @@ export type SemanticDimension = {
    */
   values?: string[];
   grains?: Partial<Record<TimeGrain, string>>;
+  /**
+   * The ClickHouse query-parameter type for a member value passed to a live
+   * lookup (member-resolver.ts). Declared per dimension so the resolver never
+   * guesses a param type from the value it's given.
+   */
+  parameterType?: "String" | "UInt32" | "Date" | "DateTime";
+};
+
+// Declares a high-cardinality "leaf" dimension whose values are looked up
+// live (too many to snapshot), disambiguated by and pinned together with
+// its coarser ancestors. One governed action for geography, product lines,
+// team trees — the hierarchy is data, not code.
+export type MemberResolver = {
+  dimensionId: string; // the leaf dimension resolved live
+  hierarchy: string[]; // ancestor dimension ids, disambiguate + pin, coarsest last
+  countLabel: string; // noun for candidate labels ("sales")
 };
 
 export type SemanticModel = {
@@ -249,6 +265,8 @@ export type SemanticModel = {
   /** Grammar source for generated measures; composed {field, aggregation} terms resolve here. */
   valueFields?: Record<string, SemanticValueField>;
   dimensions: Record<string, SemanticDimension>;
+  /** Leaf dimensions resolved through a live lookup instead of a snapshotted domain. */
+  memberResolvers?: MemberResolver[];
   defaults: {
     measure: string;
     timeDimension?: string;

@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { describeDataSource, explainSemanticTerm, planAnalysis } from "../analysis/semantic-model";
-import { planWithPlaceResolution } from "../analysis/place-resolver";
+import { planWithMemberResolution } from "../analysis/member-resolver";
 import { runAnalysis, summarizeSpec } from "../analysis/pipeline";
 import type { AnalysisPlanResult } from "../analysis/types";
 import type { ViewSpec } from "../shared/view-spec";
@@ -140,7 +140,7 @@ export const inspectAnalysis = tool({
     "Always call this before renderAnalysis. It returns governed IDs or supported clarification choices.",
   inputSchema: analysisDraftSchema,
   execute: async (draft): Promise<AnalysisPlanResult> =>
-    planWithPlaceResolution({ ...draft, sourceId: getBoundSourceId() }),
+    planWithMemberResolution({ ...draft, sourceId: getBoundSourceId() }),
   toModelOutput: ({ output }) => ({
     type: "text",
     value: planSummary(output as AnalysisPlanResult),

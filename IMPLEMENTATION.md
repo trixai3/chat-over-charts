@@ -61,7 +61,7 @@ V2-1 至 V2-7 的可用内核约 **7–10 个开发日**。完成 V2-8 后，一
 
 1. Source Pack registry + 房价 model 迁入 `src/analysis/sources/`（**零行为变化**）。✅ 完成并验证
 2. Source binding（删除 `sourceId`，`onBoot` + `locals` 注入）。✅ 完成并验证
-3. 通用 member resolution（声明式 resolver 替换 `place-resolver.ts`）+ 最小 clarification spec。⬜
+3. 通用 member resolution（声明式 `memberResolvers` 替换 `place-resolver.ts` → `member-resolver.ts`）。✅ 完成并验证
 4. 领域解耦 prompt / measure menu。⬜
 5. 第二个真实 Source Pack 全链路证明。⬜
 
