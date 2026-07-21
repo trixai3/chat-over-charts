@@ -685,7 +685,7 @@ it's the hackathon's headline ask, and Trigger.dev judges will reward depth on t
    Trigger.dev put this knowledge.)
 3. **Two architecture assumptions are now verified against those docs:** HITL-via-no-`execute`-tool
    is exactly right; `onAction` works for drill-down (though it's designed for state mutation, so
-   we're borrowing it — see NOTES-day1 §4.1b).
+   we're borrowing it).
 
 - *Mitigation:* **`mockChatAgent`** from `@trigger.dev/sdk/ai/test` — an offline harness that runs
   the real `run()` loop in an in-memory task runtime: *"no network, no task runtime, no mocking the

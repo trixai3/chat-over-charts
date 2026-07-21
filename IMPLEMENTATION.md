@@ -385,7 +385,7 @@ npm run source:doctor -- support-tickets
    - ✅ SQL 已对真数据验证:Barking +16.9% 等,扫 4.03M 行 /355ms(county 剪枝生效)
    - ✅ `execute` 返回 ComparisonSpec;**`toModelOutput` 压成一行**(无 spec 字段名)
 6. ✅ **turn-2 回归测试** `trigger/no-leak.test.ts` — 连问三轮,断言 turn 2/3 prompt 无 ViewSpec JSON
-   - ✅ **必过、有牙**:临时让 toModelOutput 泄漏 → 测试立刻变红(见 NOTES-day2 §6)
+   - ✅ **必过、有牙**:临时让 toModelOutput 泄漏 → 测试立刻变红(变异测试验证过)
    - ✅ `mockChatAgent` + `setupLocals` 假 CH,完全离线
 
 **Day 2 收尾于:** 打字提问 → agent 选 tool → 真图流进来。整个产品的瘦版本。
