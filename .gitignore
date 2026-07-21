@@ -45,3 +45,6 @@ next-env.d.ts
 # agent skills — 第三方内容,用 skills-lock.json + `npx skills add` 重建
 .agents/
 .claude/skills/
+
+# Local-only submission material — deliberately not published
+docs/submission.md
