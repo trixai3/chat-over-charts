@@ -198,6 +198,11 @@ export const ukHousePrices: SemanticModel = {
   memberResolvers: [
     { dimensionId: "locality", hierarchy: ["district", "county"], countLabel: "sales" },
   ],
+  exampleQuestions: [
+    "How did median prices change per year in London's top districts?",
+    "Show Lambeth median prices by year since 2015",
+    "Compare property types in Greater London by median price",
+  ],
   // Domain-specific question recipes core agent code never hardcodes (Slice
   // 4: the static prompt is source-neutral, so this reasoning travels with
   // the pack instead).

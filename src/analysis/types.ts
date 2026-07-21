@@ -274,6 +274,8 @@ export type SemanticModel = {
    * agent code, only the generated per-source catalog.
    */
   promptHints?: string[];
+  /** The frontend's per-source "Try asking" starters — plain questions, no SQL. */
+  exampleQuestions?: string[];
   defaults: {
     measure: string;
     timeDimension?: string;

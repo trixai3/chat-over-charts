@@ -7,12 +7,7 @@ import { useTriggerChatTransport } from "@trigger.dev/sdk/chat/react";
 import type { houseAgent } from "../../trigger/house-agent";
 import { mintChatAccessToken, startChatSession } from "@/app/actions";
 import { Tile } from "@/components/tile-renderer";
-
-const EXAMPLES = [
-  "How did median prices change per year in London's top districts?",
-  "Show Lambeth median prices by year since 2015",
-  "Compare property types in Greater London by median price",
-];
+import type { SourceOption } from "@/analysis/source-options";
 
 /** Only presentation tools produce ViewSpecs; planning output stays invisible. */
 function toolOutputs(parts: readonly unknown[]): unknown[] {
@@ -152,11 +147,66 @@ function messageText(parts: readonly unknown[]): string {
     .join("");
 }
 
-export function Chat() {
+/**
+ * Thin wrapper: owns which source is bound and renders the picker (V2 §7.4 —
+ * one session ↔ one bound source, switching is a new conversation, never
+ * mid-chat). All chat/session state lives in ChatSession below.
+ */
+export function Chat({ sources }: { sources: SourceOption[] }) {
+  const [sourceId, setSourceId] = useState(sources[0]?.id);
+  const active = sources.find((source) => source.id === sourceId);
+
+  return (
+    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-6 py-10">
+      <header className="mb-8">
+        <h1 className="text-2xl font-semibold tracking-tight">Beyond the Wall of Text</h1>
+        <p className="mt-1 text-sm text-black/50 dark:text-white/50">
+          Chat with your data and get answers as governed figures, not paragraphs — shown here on UK house prices.
+        </p>
+      </header>
+
+      {sources.length > 1 && (
+        <div className="mb-6 flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
+            {sources.map((source) => (
+              <button
+                key={source.id}
+                type="button"
+                onClick={() => setSourceId(source.id)}
+                className={
+                  source.id === sourceId
+                    ? "rounded-full bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
+                    : "rounded-lg border border-black/10 bg-black/[0.02] px-4 py-2 text-sm transition-colors hover:bg-black/[0.05] dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
+                }
+              >
+                {source.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-black/40 dark:text-white/40">
+            Switching sources starts a new conversation.
+          </p>
+        </div>
+      )}
+
+      {active === undefined ? (
+        <p className="text-sm text-black/50 dark:text-white/50">No data source is registered.</p>
+      ) : (
+        // The `key` remount IS the new-conversation mechanic: changing it tears
+        // down ChatSession's useChat state and mounts a fresh instance with a
+        // fresh chatId, so onBoot binds the newly selected source server-side.
+        <ChatSession key={active.id} source={active} />
+      )}
+    </main>
+  );
+}
+
+function ChatSession({ source }: { source: SourceOption }) {
   const transport = useTriggerChatTransport<typeof houseAgent>({
     task: "house-agent",
     accessToken: ({ chatId }) => mintChatAccessToken(chatId),
     startSession: ({ chatId, clientData }) => startChatSession({ chatId, clientData }),
+    clientData: { sourceId: source.id },
   });
   const { messages, sendMessage, addToolOutput, stop, status } = useChat({
     transport,
@@ -188,28 +238,23 @@ export function Chat() {
     pendingClarifications(lastAssistantParts).length === 0;
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-6 py-10">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Beyond the Wall of Text</h1>
-        <p className="mt-1 text-sm text-black/50 dark:text-white/50">
-          Chat with your data and get answers as governed figures, not paragraphs — shown here on UK house prices.
-        </p>
-      </header>
-
+    <>
       {empty ? (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium text-black/40 dark:text-white/40">Try asking</p>
-          {EXAMPLES.map((question) => (
-            <button
-              key={question}
-              type="button"
-              onClick={() => submit(question)}
-              className="rounded-lg border border-black/10 bg-black/[0.02] px-4 py-3 text-left text-sm transition-colors hover:bg-black/[0.05] dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
-            >
-              {question}
-            </button>
-          ))}
-        </div>
+        source.exampleQuestions.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium text-black/40 dark:text-white/40">Try asking</p>
+            {source.exampleQuestions.map((question) => (
+              <button
+                key={question}
+                type="button"
+                onClick={() => submit(question)}
+                className="rounded-lg border border-black/10 bg-black/[0.02] px-4 py-3 text-left text-sm transition-colors hover:bg-black/[0.05] dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.06]"
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+        )
       ) : (
         <div className="flex flex-1 flex-col gap-6">
           {messages.map((message) => {
@@ -314,6 +359,6 @@ export function Chat() {
           </button>
         )}
       </form>
-    </main>
+    </>
   );
 }
