@@ -281,7 +281,7 @@ npm run source:doctor -- support-tickets
 
 > **Figure generator redesign (19 Jul):** the generic semantic-query, chart-policy,
 > validation, explanation, and clarification implementation is documented in
-> [`FIGURE_GENERATOR_IMPLEMENTATION.md`](FIGURE_GENERATOR_IMPLEMENTATION.md).
+> [`docs/FIGURE_GENERATOR_IMPLEMENTATION.md`](docs/FIGURE_GENERATOR_IMPLEMENTATION.md).
 
 > 下面记录 2026-07-18 起的 V1 状态，供核对已有能力与历史决策；Architecture V2 的
 > 当前执行状态以上面的 V2 表为准。
