@@ -13,17 +13,6 @@ This one **never returns prose**. Every answer is a typed **ViewSpec** that rend
 every chart carries its provenance: the exact SQL, rows scanned, and query time. The only text the
 product produces is a single headline verdict.
 
-## How ClickHouse and Trigger.dev are used
-
-**ClickHouse** is the primary database — 31M Land Registry sales (1995 → May 2026), loaded into our
-own Cloud service with our own schema and ORDER BY key. Every query is an aggregate; only small
-results are streamed. It also answers member resolution live (which districts does this locality
-span?) in tens of milliseconds.
-
-**Trigger.dev** is not orchestration bolted on the side — it *is* the backend. `chat.agent()` runs
-each conversation as one long-lived durable task; there are **no Next.js API routes**. Place
-disambiguation suspends the run (human-in-the-loop) until the user picks.
-
 ## Under the hood: a question becomes a figure
 
 The whole path, one line:
