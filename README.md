@@ -1,4 +1,4 @@
-# Beyond the Wall of Text
+# Chat Over Charts
 
 **Chat with your data and get answers as governed figures, not paragraphs — shown here on UK house prices.**
 
@@ -13,20 +13,6 @@ This one **never returns prose**. Every answer is a typed **ViewSpec** that rend
 every chart carries its provenance: the exact SQL, rows scanned, and query time. The only text the
 product produces is a single headline verdict.
 
-## How it stays honest
-
-The LLM's job is deliberately small: translate the question into a constrained analysis intent
-(governed measure and dimension IDs, closed enums, Zod-validated tool params). Trusted code does
-everything else — resolves terms against the semantic layer, compiles the ClickHouse SQL, picks a
-compatible figure, and builds the ViewSpec.
-
-- **The LLM never writes SQL.** Not a fragment, not a table name.
-- **The data source is bound server-side per session.** The model cannot pick or switch sources.
-- **Metrics are medians** (`quantileTDigest`), never averages — prices are heavily right-skewed and
-  `avg(price)` is a lie.
-- Ambiguous place names ("Clapham" resolves to 11 places across 6 counties) trigger a live governed
-  lookup and a disambiguation prompt instead of a silent guess.
-
 ## How ClickHouse and Trigger.dev are used
 
 **ClickHouse** is the primary database — 31M Land Registry sales (1995 → May 2026), loaded into our
@@ -38,12 +24,83 @@ span?) in tens of milliseconds.
 each conversation as one long-lived durable task; there are **no Next.js API routes**. Place
 disambiguation suspends the run (human-in-the-loop) until the user picks.
 
+## Under the hood: a question becomes a figure
+
+The whole path, one line:
+
+> user query → durable run (bind source) → system prompt → `inspectAnalysis` (resolve terms + pick
+> provisional figure) → *[`requestClarification` suspends the run if ambiguous]* → `renderAnalysis`
+> (SQL → validate → finalize figure → ViewSpec) → `emitVerdict` → tiles render
+
+Everything below is trusted code **except the tool choices** — which tool to call and what semantic
+terms to fill in is the model's entire job.
+
+**1. The browser opens a durable run.**
+[`src/components/chat.tsx`](src/components/chat.tsx) wires `useTriggerChatTransport` to the
+`house-agent` task and calls `sendMessage`. The two server actions in
+[`src/app/actions.ts`](src/app/actions.ts) — `createStartSessionAction` and a session-scoped token
+mint — start the run and authorize it. These are Next.js **server actions**, not API routes
+(invariant 7); the browser never sees a secret key.
+
+**2. The run boots and binds the source server-side.**
+[`trigger/house-agent.ts`](trigger/house-agent.ts) is the entire backend, one `chat.agent()`.
+`onBoot` calls `bindSource(clientData.sourceId)`
+([`src/agent/source-context.ts`](src/agent/source-context.ts)) — the model never sees or sets which
+source it queries. `run` is a single `streamText` with `stopWhen: stepCountIs(15)`; the model picks
+its own steps (invariant 4), not a fixed prompt chain.
+
+**3. The system prompt is mechanics + generated vocabulary.**
+A fixed generic block (the tool loop, clarification protocol, figure-selection cues) plus
+`sourcePromptCatalog(model)` ([`src/agent/source-prompt.ts`](src/agent/source-prompt.ts)), which
+generates the measure synonyms, distribution notes, and hints from the bound `SemanticModel`. No
+measure or column name is hard-coded in the agent layer.
+
+**4. The model resolves the question — `inspectAnalysis`.**
+Defined in [`src/agent/tools.ts`](src/agent/tools.ts). The model fills a Zod-validated intent
+(measure/dimension terms, filters, optional preferred figure) — never SQL. `execute` runs
+`planWithMemberResolution` ([`src/analysis/member-resolver.ts`](src/analysis/member-resolver.ts)) →
+`planAnalysis` ([`src/analysis/semantic-model.ts`](src/analysis/semantic-model.ts)) +
+`selectProvisionalFigure` ([`src/analysis/chart-policy.ts`](src/analysis/chart-policy.ts)).
+`toModelOutput` compresses the result to one line — `READY`, `NEEDS_CLARIFICATION`, or `UNSUPPORTED`
+— so rendering data never enters the prompt (invariant 2).
+
+**5. Ambiguity suspends the run — `requestClarification`.**
+This tool has **no `execute`**, so Trigger.dev suspends the durable run (human-in-the-loop) until the
+frontend adds the picked option via `addToolOutput` (back in `chat.tsx`). This is the "which
+London?" / "too many districts to plot" / "which Clapham?" gate; the candidate list comes from a
+live governed `GROUP BY` in [`member-resolver.ts`](src/analysis/member-resolver.ts), never a guess.
+
+**6. Trusted code renders — `renderAnalysis`.** No LLM from here on:
+- `compileClickHouseQuery` ([`src/analysis/clickhouse-adapter.ts`](src/analysis/clickhouse-adapter.ts))
+  — parameterized SQL only: `quantileTDigest` medians, `lagInFrame(…) OVER trend_window` for
+  vs-previous-period deltas, `histogramIf(20)` clipped to P0.5–P99.5 for distributions.
+- `ClickHouseAdapter.execute` runs it on ClickHouse Cloud and returns rows plus `QueryStats` (rows
+  read, ms, query id).
+- `runAnalysis` ([`src/analysis/pipeline.ts`](src/analysis/pipeline.ts)) validates the dataset, calls
+  `finalizeFigure` on the *actual* result shape, then `buildSpec` assembles the typed `ViewSpec`
+  ([`src/shared/view-spec.ts`](src/shared/view-spec.ts)) with its `ExplanationManifest` — the exact
+  SQL, provenance, and limitations shown in the tile footer. Empty results, validation failures, or a
+  spec over the ~700 KB stream cap become a governed `notice` tile, never a crash. `summarizeSpec`
+  hands the model one summary line; it never sees the figure it just produced.
+
+**7. The verdict ends the run — `emitVerdict`.**
+The one and only way to conclude (invariant 1: no prose channel exists). On the final allowed step,
+`prepareStep` in [`house-agent.ts`](trigger/house-agent.ts) mechanically forces this call via
+`toolChoice`, so a run can never burn its step budget and end verdict-less.
+
+**8. Tiles render.**
+Tool outputs stream back into `useChat().messages`.
+[`src/components/tile-renderer.tsx`](src/components/tile-renderer.tsx) runs `ViewSpec.safeParse` — the
+single runtime validation boundary (invariant 6) — and dispatches to a component in
+[`src/components/tiles/`](src/components/tiles/). The `satisfies Record<ViewSpecKind, …>` on the
+renderer map turns a forgotten renderer into a compile error instead of a blank tile mid-demo.
+
 ## Stack
 
 | | |
 |---|---|
 | Runtime | Trigger.dev `chat.agent()` (`@trigger.dev/sdk` ≥4.5.0) |
-| Model layer | Vercel AI SDK **v6** + `@ai-sdk/anthropic` |
+| Model layer | Vercel AI SDK **v6**; provider switch (`MODEL_PROVIDER`) — OpenRouter (dev default) or `@ai-sdk/anthropic` (demo) |
 | Data | ClickHouse Cloud |
 | Frontend | Next.js 16, React 19, Tailwind v4 |
 
